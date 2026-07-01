@@ -2,15 +2,18 @@
 module.exports = {
   apps: [
     {
-      name: "race-innovations",
+      name: "meetings-app",
       script: "node_modules/next/dist/bin/next",
-      args: "start -p 3000",
+      // Port is taken from the PORT env below (3009 on the VPS — 3000 is used by
+      // another app). Change PORT to move the app to a different port.
+      args: "start",
       cwd: __dirname,
       instances: 1, // keep at 1 — typing/presence state is per-process (in-memory)
       autorestart: true,
       max_memory_restart: "1G",
       env: {
         NODE_ENV: "production",
+        PORT: 3009,
       },
     },
   ],
