@@ -1,0 +1,32 @@
+# Nginx reverse proxy for the app (Next.js on 127.0.0.1:3000).
+# Put this in /etc/nginx/sites-available/race-innovations and symlink to
+# sites-enabled, then run certbot to add HTTPS (see DEPLOY.md).
+#
+# After certbot --nginx, it will add the 443 server block + redirect for you.
+
+server {
+    listen 80;
+    server_name your-domain.com;        # <-- change to your domain
+
+    # Allow large file uploads (the app supports up to 1 GB).
+    client_max_body_size 1024M;
+
+    # Don't buffer huge uploads to disk in nginx.
+    proxy_request_buffering off;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+
+        # Long timeouts so big uploads don't get cut off.
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}

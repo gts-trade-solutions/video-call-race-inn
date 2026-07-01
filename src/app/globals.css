@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Accent color as "R G B" triplets (themeable at runtime). Default: black */
+  --accent: 24 24 27;
+  --accent-dark: 9 9 11;
+  --accent-darker: 0 0 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: #f5f5f5;
+  color: #242424;
+}
+
+/* ---- LiveKit dark theme tweaks to feel like Teams ---- */
+.lk-video-conference {
+  --lk-bg: #1f1f1f;
+  --lk-accent-bg: rgb(var(--accent));
+  --lk-accent-fg: #ffffff;
+  height: 100%;
+}
+
+.lk-control-bar {
+  background: #2d2c2c;
+  border-top: 1px solid #3d3d3d;
+}
+
+.lk-button.lk-button-active,
+.lk-button[data-lk-active="true"] {
+  background: rgb(var(--accent));
+}
+
+.lk-prejoin {
+  --lk-bg: #f5f5f5;
+}
+
+/* ---- Teams custom call UI ---- */
+.ctrl-label {
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* Floating emoji reactions rise + fade */
+@keyframes reaction-rise {
+  0% {
+    transform: translateY(0) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    transform: translateY(-10px) scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-220px) scale(1);
+    opacity: 0;
+  }
+}
+.reaction-float {
+  animation: reaction-rise 3s ease-out forwards;
+}
+
+/* Make the LiveKit <video> fill our custom tiles */
+.lk-participant-media-video {
+  width: 100%;
+  height: 100%;
+}
