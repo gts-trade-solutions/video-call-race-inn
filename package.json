@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1088.0",
+    "@aws-sdk/client-sesv2": "^3.1090.0",
     "@aws-sdk/s3-request-presigner": "^3.1088.0",
     "@livekit/components-react": "^2.6.9",
     "@livekit/components-styles": "^1.1.4",

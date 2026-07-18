@@ -1,10 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const OAUTH_ERRORS: Record<string, string> = {
+  google_unconfigured: "Google Sign-In isn't set up on the server yet.",
+  google_denied: "Google sign-in was cancelled.",
+  google_unverified:
+    "Your Google account's email isn't verified, so we can't sign you in.",
+  google_failed: "Google sign-in failed. Please try again.",
+};
 
 export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
@@ -15,8 +23,24 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [touched, setTouched] = useState(false);
+  const [googleEnabled, setGoogleEnabled] = useState(false);
 
   const isRegister = mode === "register";
+  const nextParam = params.get("next") || "/dashboard";
+
+  // Show the Google button only when the server has it configured.
+  useEffect(() => {
+    fetch("/api/auth/google/status")
+      .then((r) => (r.ok ? r.json() : { configured: false }))
+      .then((d) => setGoogleEnabled(!!d.configured))
+      .catch(() => {});
+  }, []);
+
+  // Surface an error bounced back from the OAuth callback (?error=...).
+  useEffect(() => {
+    const err = params.get("error");
+    if (err && OAUTH_ERRORS[err]) setError(OAUTH_ERRORS[err]);
+  }, [params]);
 
   // Lightweight client-side validation so users get instant feedback
   // instead of a round-trip for obvious mistakes.
@@ -151,6 +175,23 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
           </button>
         </form>
 
+        {googleEnabled && (
+          <>
+            <div className="flex items-center gap-3 my-5">
+              <div className="h-px flex-1 bg-teams-line" />
+              <span className="text-xs text-teams-gray">or</span>
+              <div className="h-px flex-1 bg-teams-line" />
+            </div>
+            <a
+              href={`/api/auth/google?next=${encodeURIComponent(nextParam)}`}
+              className="w-full flex items-center justify-center gap-2.5 border border-teams-line hover:bg-teams-bg rounded-md py-2.5 font-medium text-teams-dark transition-colors"
+            >
+              <GoogleG />
+              {isRegister ? "Sign up with Google" : "Continue with Google"}
+            </a>
+          </>
+        )}
+
         <p className="text-sm text-teams-gray text-center mt-6">
           {isRegister ? (
             <>
@@ -270,6 +311,29 @@ export function PasswordField({
         <span className="text-xs text-teams-gray mt-1 block">{hint}</span>
       ) : null}
     </label>
+  );
+}
+
+function GoogleG() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"
+      />
+      <path
+        fill="#34A853"
+        d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7A21.99 21.99 0 0 0 24 46z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M11.69 28.18A13.2 13.2 0 0 1 11 24c0-1.45.25-2.86.69-4.18v-5.7H4.34A21.99 21.99 0 0 0 2 24c0 3.55.85 6.91 2.34 9.88l7.35-5.7z"
+      />
+      <path
+        fill="#EA4335"
+        d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.94 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"
+      />
+    </svg>
   );
 }
 
