@@ -3,13 +3,38 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SessionUser } from "@/lib/auth";
+import {
+  googleCalendarUrl,
+  outlookCalendarUrl,
+  meetingEvent,
+} from "@/lib/calendar";
 
 type Meeting = {
   roomId: string;
   title: string;
   createdAt: string;
   scheduledAt: string | null;
+  durationMins: number | null;
+  googleHtmlLink: string | null;
   isHost: number;
+};
+
+type GoogleStatus = {
+  configured: boolean;
+  connected: boolean;
+  email?: string | null;
+};
+
+type Recording = {
+  id: number;
+  roomId: string;
+  title: string | null;
+  status: "recording" | "completing" | "completed" | "failed";
+  startedBy: string | null;
+  startedAt: string;
+  durationSecs: number | null;
+  sizeBytes: number | null;
+  downloadUrl: string | null;
 };
 
 export default function DashboardClient({ user }: { user: SessionUser }) {
@@ -23,13 +48,63 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
   const [showSchedule, setShowSchedule] = useState(false);
   const [createdLink, setCreatedLink] = useState<string | null>(null);
 
+  const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [google, setGoogle] = useState<GoogleStatus>({
+    configured: false,
+    connected: false,
+  });
+  const [calMsg, setCalMsg] = useState<string | null>(null);
+
   function loadMeetings() {
     fetch("/api/meetings")
       .then((r) => (r.ok ? r.json() : { meetings: [] }))
       .then((d) => setMeetings(d.meetings || []))
       .catch(() => {});
   }
+  function loadRecordings() {
+    fetch("/api/livekit/recordings")
+      .then((r) => (r.ok ? r.json() : { recordings: [] }))
+      .then((d) => setRecordings(d.recordings || []))
+      .catch(() => {});
+  }
+  function loadGoogleStatus() {
+    fetch("/api/calendar/google/status")
+      .then((r) => (r.ok ? r.json() : { configured: false, connected: false }))
+      .then((d) => setGoogle(d))
+      .catch(() => {});
+  }
   useEffect(loadMeetings, []);
+  useEffect(loadRecordings, []);
+  useEffect(loadGoogleStatus, []);
+
+  // Surface the result of the Google OAuth round-trip (?calendar=...).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const c = params.get("calendar");
+    if (!c) return;
+    const messages: Record<string, string> = {
+      connected: "Google Calendar connected ✓",
+      denied: "Google Calendar connection was cancelled.",
+      error: "Couldn't connect Google Calendar. Please try again.",
+      unconfigured: "Google Calendar isn't set up on the server yet.",
+    };
+    setCalMsg(messages[c] || null);
+    loadGoogleStatus();
+    // Clean the query param out of the URL.
+    window.history.replaceState({}, "", "/dashboard");
+    const t = setTimeout(() => setCalMsg(null), 5000);
+    return () => clearTimeout(t);
+  }, []);
+
+  function connectGoogle() {
+    window.location.href = "/api/calendar/google/connect";
+  }
+  async function disconnectGoogle() {
+    await fetch("/api/calendar/google/disconnect", { method: "POST" }).catch(
+      () => {}
+    );
+    loadGoogleStatus();
+  }
 
   const links = meetings.filter((m) => !m.scheduledAt);
   const scheduled = meetings
@@ -92,6 +167,11 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
             {error}
           </div>
         )}
+        {calMsg && (
+          <div className="mb-4 text-sm text-teams-dark bg-teams-purple/10 border border-teams-purple/30 rounded-md px-3 py-2">
+            {calMsg}
+          </div>
+        )}
 
         {/* Three action buttons */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -141,7 +221,7 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
             {links.map((m) => (
               <div
                 key={m.roomId}
-                className="flex items-center justify-between px-5 py-4 hover:bg-teams-bg/60"
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 sm:px-5 py-4 hover:bg-teams-bg/60"
               >
                 <div className="min-w-0">
                   <div className="font-medium text-teams-dark truncate">
@@ -180,10 +260,33 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
         )}
 
         {/* Scheduled meetings */}
-        <div className="flex items-center justify-between mt-10 mb-3">
+        <div className="flex items-center justify-between mt-10 mb-3 gap-3 flex-wrap">
           <h2 className="text-lg font-bold text-teams-dark">
             Scheduled meetings
           </h2>
+          {google.configured &&
+            (google.connected ? (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="inline-flex items-center gap-1.5 text-green-700 bg-green-50 border border-green-200 rounded-full px-2.5 py-1">
+                  <GoogleIcon />
+                  {google.email || "Google Calendar"} ✓
+                </span>
+                <button
+                  onClick={disconnectGoogle}
+                  className="text-teams-gray hover:text-red-600 hover:underline"
+                >
+                  Disconnect
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={connectGoogle}
+                className="inline-flex items-center gap-2 text-sm border border-teams-line hover:bg-teams-bg rounded-md px-3 py-1.5 font-medium"
+              >
+                <GoogleIcon />
+                Connect Google Calendar
+              </button>
+            ))}
         </div>
         {scheduled.length === 0 ? (
           <div className="border border-teams-line rounded-lg p-6 text-sm text-teams-gray">
@@ -198,7 +301,7 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
             {scheduled.map((m) => (
               <div
                 key={m.roomId}
-                className="flex items-center justify-between px-5 py-4 hover:bg-teams-bg/60"
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 sm:px-5 py-4 hover:bg-teams-bg/60"
               >
                 <div className="flex items-center gap-4 min-w-0">
                   <DateBadge iso={m.scheduledAt!} />
@@ -208,10 +311,23 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
                     </div>
                     <div className="text-xs text-teams-gray">
                       {formatWhen(m.scheduledAt!)}
+                      {m.durationMins ? ` · ${m.durationMins} min` : ""}
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  <AddToCalendarMenu meeting={m} />
+                  {m.googleHtmlLink && (
+                    <a
+                      href={m.googleHtmlLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="View in Google Calendar"
+                      className="text-sm border border-teams-line hover:bg-white rounded-md px-2.5 py-1.5 inline-flex items-center"
+                    >
+                      <GoogleIcon />
+                    </a>
+                  )}
                   <button
                     onClick={() => copy(m.roomId)}
                     className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5"
@@ -232,6 +348,58 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
                     >
                       Cancel
                     </button>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Recordings */}
+        <div className="flex items-center justify-between mt-10 mb-3">
+          <h2 className="text-lg font-bold text-teams-dark">Recordings</h2>
+          <button
+            onClick={loadRecordings}
+            className="text-sm text-teams-purple font-medium hover:underline"
+          >
+            Refresh
+          </button>
+        </div>
+        {recordings.length === 0 ? (
+          <div className="border border-teams-line rounded-lg p-6 text-sm text-teams-gray">
+            No recordings yet. Start a meeting and hit{" "}
+            <span className="font-medium text-teams-dark">Record</span> to save
+            it to S3.
+          </div>
+        ) : (
+          <div className="border border-teams-line rounded-lg divide-y divide-teams-line overflow-hidden">
+            {recordings.map((r) => (
+              <div
+                key={r.id}
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 sm:px-5 py-4 hover:bg-teams-bg/60"
+              >
+                <div className="min-w-0">
+                  <div className="font-medium text-teams-dark truncate">
+                    {r.title || `Meeting ${r.roomId}`}
+                  </div>
+                  <div className="text-xs text-teams-gray truncate">
+                    {formatWhen(r.startedAt)}
+                    {r.startedBy ? ` · by ${r.startedBy}` : ""}
+                    {r.durationSecs ? ` · ${formatDuration(r.durationSecs)}` : ""}
+                    {r.sizeBytes ? ` · ${formatSize(r.sizeBytes)}` : ""}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <RecordingStatus status={r.status} />
+                  {r.status === "completed" && r.downloadUrl ? (
+                    <a
+                      href={r.downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm bg-teams-purple hover:bg-teams-purpleDark text-white rounded-md px-3 py-1.5"
+                    >
+                      Download
+                    </a>
                   ) : null}
                 </div>
               </div>
@@ -309,6 +477,7 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
       {showSchedule && (
         <ScheduleModal
           defaultName={user.name}
+          googleConnected={google.configured && google.connected}
           onClose={() => setShowSchedule(false)}
           onScheduled={() => {
             setShowSchedule(false);
@@ -322,15 +491,19 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
 
 function ScheduleModal({
   defaultName,
+  googleConnected,
   onClose,
   onScheduled,
 }: {
   defaultName: string;
+  googleConnected: boolean;
   onClose: () => void;
   onScheduled: () => void;
 }) {
   const [title, setTitle] = useState("");
   const [when, setWhen] = useState("");
+  const [duration, setDuration] = useState(30);
+  const [addToGoogle, setAddToGoogle] = useState(googleConnected);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -348,6 +521,8 @@ function ScheduleModal({
         body: JSON.stringify({
           title: title.trim() || `${defaultName}'s meeting`,
           scheduledAt: new Date(when).toISOString(),
+          durationMins: duration,
+          addToGoogleCalendar: googleConnected && addToGoogle,
         }),
       });
       if (!res.ok) {
@@ -372,17 +547,46 @@ function ScheduleModal({
           className="mt-1 w-full rounded-md border border-teams-line px-3 py-2 outline-none focus:border-teams-purple focus:ring-1 focus:ring-teams-purple"
         />
       </label>
-      <label className="block">
-        <span className="text-sm font-medium text-teams-dark">
-          Date and time
-        </span>
-        <input
-          type="datetime-local"
-          value={when}
-          onChange={(e) => setWhen(e.target.value)}
-          className="mt-1 w-full rounded-md border border-teams-line px-3 py-2 outline-none focus:border-teams-purple focus:ring-1 focus:ring-teams-purple"
-        />
-      </label>
+      <div className="flex gap-3">
+        <label className="block flex-1">
+          <span className="text-sm font-medium text-teams-dark">
+            Date and time
+          </span>
+          <input
+            type="datetime-local"
+            value={when}
+            onChange={(e) => setWhen(e.target.value)}
+            className="mt-1 w-full rounded-md border border-teams-line px-3 py-2 outline-none focus:border-teams-purple focus:ring-1 focus:ring-teams-purple"
+          />
+        </label>
+        <label className="block w-32">
+          <span className="text-sm font-medium text-teams-dark">Duration</span>
+          <select
+            value={duration}
+            onChange={(e) => setDuration(Number(e.target.value))}
+            className="mt-1 w-full rounded-md border border-teams-line px-3 py-2 outline-none focus:border-teams-purple focus:ring-1 focus:ring-teams-purple bg-white"
+          >
+            <option value={15}>15 min</option>
+            <option value={30}>30 min</option>
+            <option value={45}>45 min</option>
+            <option value={60}>1 hour</option>
+            <option value={90}>1.5 hours</option>
+            <option value={120}>2 hours</option>
+          </select>
+        </label>
+      </div>
+      {googleConnected && (
+        <label className="flex items-center gap-2 mt-3 text-sm text-teams-dark cursor-pointer">
+          <input
+            type="checkbox"
+            checked={addToGoogle}
+            onChange={(e) => setAddToGoogle(e.target.checked)}
+            className="rounded border-teams-line text-teams-purple focus:ring-teams-purple"
+          />
+          <GoogleIcon />
+          Add to my Google Calendar
+        </label>
+      )}
       {err && <p className="text-sm text-red-600 mt-2">{err}</p>}
       <div className="flex justify-end gap-2 mt-4">
         <button
@@ -456,6 +660,170 @@ function formatWhen(iso: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatDuration(secs: number) {
+  const s = Math.max(0, Math.round(secs));
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) return `${h}h ${m % 60}m`;
+  if (m > 0) return `${m}m ${s % 60}s`;
+  return `${s}s`;
+}
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = bytes / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
+function RecordingStatus({ status }: { status: Recording["status"] }) {
+  const map: Record<Recording["status"], { label: string; cls: string }> = {
+    recording: {
+      label: "● Recording",
+      cls: "text-red-600 bg-red-50 border-red-200",
+    },
+    completing: {
+      label: "Processing…",
+      cls: "text-amber-600 bg-amber-50 border-amber-200",
+    },
+    completed: {
+      label: "Ready",
+      cls: "text-green-700 bg-green-50 border-green-200",
+    },
+    failed: {
+      label: "Failed",
+      cls: "text-red-600 bg-red-50 border-red-200",
+    },
+  };
+  const s = map[status];
+  return (
+    <span
+      className={`text-xs font-medium border rounded-full px-2.5 py-1 ${s.cls}`}
+    >
+      {s.label}
+    </span>
+  );
+}
+
+function AddToCalendarMenu({ meeting }: { meeting: Meeting }) {
+  const [open, setOpen] = useState(false);
+  const [origin, setOrigin] = useState("");
+  useEffect(() => setOrigin(window.location.origin), []);
+
+  const ev = origin
+    ? meetingEvent(origin, {
+        roomId: meeting.roomId,
+        title: meeting.title,
+        scheduledAt: meeting.scheduledAt,
+        durationMins: meeting.durationMins,
+      })
+    : null;
+
+  const item =
+    "block px-3 py-2 text-sm text-teams-dark hover:bg-teams-bg text-left";
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Add to calendar"
+        className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5 inline-flex items-center gap-1.5"
+      >
+        <CalIcon />
+        <span className="hidden sm:inline">Calendar</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-1 z-20 bg-white border border-teams-line rounded-lg shadow-lg py-1 w-52">
+            {ev && (
+              <>
+                <a
+                  href={googleCalendarUrl(ev)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setOpen(false)}
+                  className={item}
+                >
+                  Google Calendar
+                </a>
+                <a
+                  href={outlookCalendarUrl(ev)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setOpen(false)}
+                  className={item}
+                >
+                  Outlook
+                </a>
+              </>
+            )}
+            <a
+              href={`/api/meetings/ics?roomId=${encodeURIComponent(
+                meeting.roomId
+              )}`}
+              onClick={() => setOpen(false)}
+              className={item}
+            >
+              Apple / Download .ics
+            </a>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CalIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <rect
+        x="3"
+        y="4"
+        width="18"
+        height="17"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M3 9h18M8 2v4M16 2v4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 48 48" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"
+      />
+      <path
+        fill="#34A853"
+        d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7A21.99 21.99 0 0 0 24 46z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M11.69 28.18A13.2 13.2 0 0 1 11 24c0-1.45.25-2.86.69-4.18v-5.7H4.34A21.99 21.99 0 0 0 2 24c0 3.55.85 6.91 2.34 9.88l7.35-5.7z"
+      />
+      <path
+        fill="#EA4335"
+        d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.94 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"
+      />
+    </svg>
+  );
 }
 
 function LinkIcon() {

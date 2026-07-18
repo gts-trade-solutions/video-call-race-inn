@@ -10,7 +10,13 @@ A Microsoft Teams–style video calling app built with **Next.js (App Router)**,
 - 👥 **Call stage** — adaptive video grid with active-speaker focus.
 - 🖥️ **Screen share** — share a screen, window, or tab to everyone.
 - 💬 **In-call chat** — text chat sidebar during the call.
-- 🎛️ **Controls** — mute/unmute, camera on/off, screen share, leave.
+- 🌫️ **Background blur** — one-tap local camera blur (LiveKit track processors).
+- 🔦 **Spotlight** — put one person big on everyone's screen (broadcast to all).
+- 💾 **Local recording** — record the meeting straight to your own device (no cloud).
+- 🔑 **Auth niceties** — show/hide password, inline validation, and a full **forgot-password** flow that emails a **4-digit code** (shown on screen in dev), with expiry + attempt limits.
+- ⏺️ **Recording → S3** — record the whole meeting (video + audio) with one button; LiveKit Egress uploads the MP4 straight to Amazon S3, and finished recordings appear on the dashboard with a download link.
+- 📅 **Schedule + calendar** — schedule meetings with a duration, add them to Google / Outlook / Apple with one click (or download an `.ics`), and optionally sync straight into your **Google Calendar**.
+- 🎛️ **Controls** — mute/unmute, camera on/off, screen share, record, leave.
 
 ## Tech stack
 
@@ -112,6 +118,86 @@ src/
 │   └── db.ts
 └── middleware.ts
 ```
+
+## Recording to S3
+
+The **Record** button in the call bar records the whole room (a server-side
+"room composite" MP4) via **LiveKit Egress** and uploads it directly to your S3
+bucket — nothing streams through this app, so it scales cleanly.
+
+1. **Enable Egress.** It's built in on **LiveKit Cloud** (nothing to do). If you
+   self-host LiveKit, run the [egress service](https://docs.livekit.io/home/self-hosting/egress/).
+2. **Create an S3 bucket** and an IAM user/role that can `s3:PutObject` (and
+   `s3:GetObject` for downloads) on it.
+3. **Configure env** in `.env.local`:
+
+   ```env
+   AWS_S3_BUCKET_NAME=your-recordings-bucket
+   AWS_S3_REGION=us-east-1
+   AWS_S3_ACCESS_KEY_ID=AKIA...
+   AWS_S3_SECRET_ACCESS_KEY=...
+   NEXT_PUBLIC_S3_BUCKET_URL=https://your-recordings-bucket.s3.us-east-1.amazonaws.com/
+   # S3-compatible stores (MinIO / R2 / Wasabi) also work:
+   # S3_ENDPOINT=https://s3.example.com
+   # S3_FORCE_PATH_STYLE=true
+   ```
+
+**How it works**
+
+- Objects are written to `recordings/<room>/<room>-<timestamp>.mp4`.
+- The `recordings` table (auto-created) tracks each egress: room, who started
+  it, status, and the final S3 key/size/duration.
+- The bucket can stay **private** — the dashboard's **Download** links are
+  short-lived S3 presigned URLs (generated with `@aws-sdk/s3-request-presigner`).
+- Recording is shared state: the red **REC** badge and button reflect the same
+  server-tracked egress for every participant, and survive a page reload.
+
+If S3 isn't configured, starting a recording returns a clear error and the rest
+of the app works normally.
+
+## Calendar
+
+Scheduled meetings can be added to any calendar, and optionally synced into
+Google Calendar.
+
+### Add-to-Calendar links + `.ics` (no setup)
+
+Every scheduled meeting has a **Calendar** button offering **Google Calendar**,
+**Outlook**, and **Apple / Download `.ics`**. These are prefilled event links
+containing the title, time, duration, and join link — nothing to configure, and
+they work for anyone you share the meeting with. The `.ics` is served from
+`/api/meetings/ics?roomId=…`.
+
+### Google Calendar sync (optional OAuth)
+
+When configured, a **Connect Google Calendar** button appears on the dashboard.
+Once a user connects, the schedule dialog shows **"Add to my Google Calendar"**,
+and scheduling creates a real event on their primary calendar (cancelling the
+meeting deletes that event too).
+
+Setup:
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a
+   project and **enable the Google Calendar API**.
+2. Configure the **OAuth consent screen** (add the `.../auth/calendar.events`
+   and `email` scopes; add yourself as a test user while unverified).
+3. Create an **OAuth client ID** → type **Web application**. Add an authorized
+   redirect URI that exactly matches your deployment, e.g.
+   `http://localhost:3000/api/calendar/google/callback` (dev) or
+   `https://meet.yourdomain.com/api/calendar/google/callback` (prod).
+4. Put the values in `.env.local`:
+
+   ```env
+   NEXT_PUBLIC_APP_URL=https://meet.yourdomain.com
+   GOOGLE_CLIENT_ID=xxxx.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=xxxx
+   GOOGLE_OAUTH_REDIRECT_URI=https://meet.yourdomain.com/api/calendar/google/callback
+   ```
+
+Tokens (incl. refresh token) are stored per-user in the `google_calendar_tokens`
+table; access tokens auto-refresh. **Disconnect** revokes and deletes them. If
+`GOOGLE_CLIENT_ID`/`SECRET` are absent the Connect button is hidden and only the
+Add-to-Calendar links are shown.
 
 ## Troubleshooting
 

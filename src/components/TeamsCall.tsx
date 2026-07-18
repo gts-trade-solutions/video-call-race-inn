@@ -16,7 +16,11 @@ import {
   type TrackReference,
   type TrackReferenceOrPlaceholder,
 } from "@livekit/components-react";
-import { Track, type Participant } from "livekit-client";
+import { Track, type Participant, type LocalVideoTrack } from "livekit-client";
+import {
+  BackgroundProcessor,
+  supportsBackgroundProcessors,
+} from "@livekit/track-processors";
 
 type Panel = "none" | "chat" | "people";
 type CallChatMsg = {
@@ -102,6 +106,147 @@ export default function TeamsCall({ room }: { room: string }) {
   }, [panel, chatMsgs.length]);
   const unread = Math.max(0, chatMsgs.length - seen);
 
+  // ----- Recording (LiveKit Egress → S3) -----
+  // Shared across participants: the server tracks the active egress, so every
+  // client polls the same status and shows the same "REC" state.
+  const [recording, setRecording] = useState(false);
+  const [recBusy, setRecBusy] = useState(false);
+
+  const refreshRecording = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/livekit/recording?room=${encodeURIComponent(room)}`
+      );
+      if (res.ok) {
+        const d = await res.json();
+        setRecording(!!d.recording);
+      }
+    } catch {
+      /* ignore transient errors */
+    }
+  }, [room]);
+
+  // A tiny data-channel ping tells everyone to refetch the moment it changes,
+  // instead of waiting for the next poll.
+  const { send: sendRecPing } = useDataChannel("recording", () => {
+    refreshRecording();
+  });
+
+  const toggleRecording = useCallback(async () => {
+    if (recBusy) return;
+    setRecBusy(true);
+    const next = !recording;
+    try {
+      const res = await fetch("/api/livekit/recording", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room, action: next ? "start" : "stop" }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(d.error || "Recording action failed.");
+      } else {
+        setRecording(next);
+        try {
+          sendRecPing(new TextEncoder().encode(next ? "1" : "0"), {});
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch {
+      alert("Network error while toggling recording.");
+    } finally {
+      setRecBusy(false);
+      refreshRecording();
+    }
+  }, [recBusy, recording, room, sendRecPing, refreshRecording]);
+
+  useEffect(() => {
+    refreshRecording();
+    const t = setInterval(refreshRecording, 6000);
+    return () => clearInterval(t);
+  }, [refreshRecording]);
+
+  // ----- Background blur (local camera processor) -----
+  const [blurOn, setBlurOn] = useState(false);
+  const [blurBusy, setBlurBusy] = useState(false);
+  const processorRef = useRef<ReturnType<typeof BackgroundProcessor> | null>(
+    null
+  );
+
+  const camTrack = useCallback((): LocalVideoTrack | undefined => {
+    const pub = localParticipant?.getTrackPublication(Track.Source.Camera);
+    return (pub?.track as LocalVideoTrack | undefined) ?? undefined;
+  }, [localParticipant]);
+
+  const applyBlur = useCallback(
+    async (on: boolean) => {
+      const track = camTrack();
+      if (!track) return; // camera off — will apply when it turns on
+      try {
+        if (on) {
+          if (!processorRef.current) {
+            processorRef.current = BackgroundProcessor({
+              mode: "background-blur",
+              blurRadius: 12,
+            });
+          }
+          await track.setProcessor(processorRef.current);
+        } else {
+          await track.stopProcessor();
+        }
+      } catch (e) {
+        console.error("background blur error:", e);
+      }
+    },
+    [camTrack]
+  );
+
+  const toggleBlur = useCallback(async () => {
+    if (blurBusy) return;
+    if (!supportsBackgroundProcessors()) {
+      alert("Background blur isn't supported in this browser.");
+      return;
+    }
+    setBlurBusy(true);
+    const next = !blurOn;
+    await applyBlur(next);
+    setBlurOn(next);
+    setBlurBusy(false);
+  }, [blurBusy, blurOn, applyBlur]);
+
+  // Re-apply blur to a fresh camera track after the camera is toggled off/on.
+  useEffect(() => {
+    if (blurOn && isCameraEnabled) {
+      const id = setTimeout(() => applyBlur(true), 250);
+      return () => clearTimeout(id);
+    }
+  }, [isCameraEnabled, blurOn, applyBlur]);
+
+  // ----- Spotlight: everyone sees one person big -----
+  const [spotlight, setSpotlight] = useState<string | null>(null);
+  const { send: sendSpotlight } = useDataChannel("spotlight", (msg) => {
+    const v = new TextDecoder().decode(msg.payload);
+    setSpotlight(v || null);
+  });
+  const toggleSpotlight = useCallback(
+    (identity: string) => {
+      setSpotlight((cur) => {
+        const next = cur === identity ? null : identity;
+        try {
+          sendSpotlight(new TextEncoder().encode(next ?? ""), {});
+        } catch {
+          /* ignore */
+        }
+        return next;
+      });
+    },
+    [sendSpotlight]
+  );
+
+  // Local (in-browser) recording that saves an MP4/WebM to the user's device.
+  const localRec = useLocalRecorder(room);
+
   function copyInvite() {
     const link = typeof window !== "undefined" ? window.location.href : room;
     navigator.clipboard?.writeText(link).then(
@@ -112,6 +257,14 @@ export default function TeamsCall({ room }: { room: string }) {
       () => {}
     );
   }
+
+  // Focus-layout tiles for the active spotlight (if the person is still here).
+  const spotlightTile = spotlight
+    ? cameraTiles.find((t) => t.participant.identity === spotlight)
+    : undefined;
+  const otherTiles = spotlightTile
+    ? cameraTiles.filter((t) => t.participant.identity !== spotlight)
+    : cameraTiles;
 
   return (
     <div className="flex flex-col h-full bg-teams-darker text-white">
@@ -136,6 +289,12 @@ export default function TeamsCall({ room }: { room: string }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {recording && (
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-red-300 bg-red-500/15 border border-red-500/40 rounded-md px-2 py-1">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              REC
+            </span>
+          )}
           <CallTimer />
           <button
             onClick={copyInvite}
@@ -158,8 +317,18 @@ export default function TeamsCall({ room }: { room: string }) {
               screenShares={screenShares}
               cameraTiles={cameraTiles}
             />
+          ) : spotlightTile ? (
+            <SpotlightLayout
+              main={spotlightTile}
+              others={otherTiles}
+              onSpotlight={toggleSpotlight}
+            />
           ) : (
-            <GridStage tiles={cameraTiles} />
+            <GridStage
+              tiles={cameraTiles}
+              spotlight={spotlight}
+              onSpotlight={toggleSpotlight}
+            />
           )}
         </main>
 
@@ -182,8 +351,8 @@ export default function TeamsCall({ room }: { room: string }) {
       </div>
 
       {/* ---------- Control pill ---------- */}
-      <footer className="shrink-0 flex justify-center pb-4 pt-2">
-        <div className="flex items-center gap-1.5 bg-teams-stage/95 backdrop-blur rounded-2xl px-3 py-2 shadow-2xl border border-white/10">
+      <footer className="shrink-0 flex justify-start sm:justify-center px-2 pb-3 pt-2 overflow-x-auto">
+        <div className="flex items-center gap-1.5 bg-teams-stage/95 backdrop-blur rounded-2xl px-2 sm:px-3 py-2 shadow-2xl border border-white/10 mx-auto">
           <TrackToggle
             source={Track.Source.Microphone}
             showIcon={false}
@@ -202,6 +371,16 @@ export default function TeamsCall({ room }: { room: string }) {
             <span className="ctrl-label">Camera</span>
           </TrackToggle>
 
+          <button
+            onClick={toggleBlur}
+            disabled={blurBusy}
+            title={blurOn ? "Turn off background blur" : "Blur my background"}
+            className={ctrlBtn(blurOn) + " disabled:opacity-50"}
+          >
+            <BlurIcon />
+            <span className="ctrl-label">{blurBusy ? "…" : "Blur"}</span>
+          </button>
+
           <TrackToggle
             source={Track.Source.ScreenShare}
             showIcon={false}
@@ -213,6 +392,39 @@ export default function TeamsCall({ room }: { room: string }) {
           </TrackToggle>
 
           <ReactionButton />
+
+          <button
+            onClick={toggleRecording}
+            disabled={recBusy}
+            title={recording ? "Stop recording" : "Record this meeting to S3"}
+            className={[
+              "flex flex-col items-center justify-center gap-0.5 rounded-xl px-3 py-2 text-[11px] font-medium transition min-w-[58px] disabled:opacity-50",
+              recording
+                ? "bg-red-600 text-white hover:bg-red-700"
+                : "bg-white/5 text-gray-200 hover:bg-white/15",
+            ].join(" ")}
+          >
+            <RecordIcon active={recording} />
+            <span className="ctrl-label">
+              {recBusy ? "…" : recording ? "Stop" : "Record"}
+            </span>
+          </button>
+
+          <button
+            onClick={() => (localRec.recording ? localRec.stop() : localRec.start())}
+            title="Record to your device — pick 'This tab' and enable tab audio"
+            className={[
+              "flex flex-col items-center justify-center gap-0.5 rounded-xl px-3 py-2 text-[11px] font-medium transition min-w-[58px]",
+              localRec.recording
+                ? "bg-red-600 text-white hover:bg-red-700"
+                : "bg-white/5 text-gray-200 hover:bg-white/15",
+            ].join(" ")}
+          >
+            <SaveRecIcon active={localRec.recording} />
+            <span className="ctrl-label">
+              {localRec.recording ? "Stop" : "Local"}
+            </span>
+          </button>
 
           <button
             onClick={() => setPanel(panel === "chat" ? "none" : "chat")}
@@ -245,22 +457,164 @@ export default function TeamsCall({ room }: { room: string }) {
   );
 }
 
+/* =====================  Local recording  ===================== */
+
+// Records what the user sees/hears in the call tab (via getDisplayMedia) and
+// mixes in their microphone, then downloads a .webm — no server involved.
+function useLocalRecorder(room: string) {
+  const [recording, setRecording] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamsRef = useRef<MediaStream[]>([]);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  const cleanup = useCallback(() => {
+    streamsRef.current.forEach((s) => s.getTracks().forEach((t) => t.stop()));
+    streamsRef.current = [];
+    audioCtxRef.current?.close().catch(() => {});
+    audioCtxRef.current = null;
+  }, []);
+
+  const start = useCallback(async () => {
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 30 },
+        audio: true,
+      });
+      streamsRef.current.push(display);
+
+      // Mix the local mic in with the tab audio, when the mic is allowed.
+      let audioTracks = display.getAudioTracks();
+      try {
+        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamsRef.current.push(mic);
+        const ctx = new AudioContext();
+        audioCtxRef.current = ctx;
+        const dest = ctx.createMediaStreamDestination();
+        if (display.getAudioTracks().length) {
+          ctx.createMediaStreamSource(display).connect(dest);
+        }
+        ctx.createMediaStreamSource(mic).connect(dest);
+        audioTracks = dest.stream.getAudioTracks();
+      } catch {
+        /* mic denied — keep tab audio only */
+      }
+
+      const combined = new MediaStream([
+        ...display.getVideoTracks(),
+        ...audioTracks,
+      ]);
+
+      const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+        ? "video/webm;codecs=vp9,opus"
+        : "video/webm";
+      const rec = new MediaRecorder(combined, { mimeType: mime });
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => {
+        if (e.data.size) chunksRef.current.push(e.data);
+      };
+      rec.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: "video/webm" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const stamp = new Date()
+          .toISOString()
+          .slice(0, 19)
+          .replace(/[:T]/g, "-");
+        a.href = url;
+        a.download = `meeting-${room}-${stamp}.webm`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+        cleanup();
+        setRecording(false);
+      };
+      // If the user stops the capture via the browser bar, finish up.
+      display.getVideoTracks()[0]?.addEventListener("ended", () => {
+        if (rec.state !== "inactive") rec.stop();
+      });
+      rec.start(1000);
+      recorderRef.current = rec;
+      setRecording(true);
+    } catch {
+      cleanup();
+      // user cancelled the picker / denied permission — no-op
+    }
+  }, [room, cleanup]);
+
+  const stop = useCallback(() => {
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recorderRef.current.stop();
+    }
+  }, []);
+
+  useEffect(() => () => cleanup(), [cleanup]);
+  return { recording, start, stop };
+}
+
 /* =====================  Stage layouts  ===================== */
 
-function GridStage({ tiles }: { tiles: TrackReferenceOrPlaceholder[] }) {
+function GridStage({
+  tiles,
+  spotlight,
+  onSpotlight,
+}: {
+  tiles: TrackReferenceOrPlaceholder[];
+  spotlight: string | null;
+  onSpotlight: (identity: string) => void;
+}) {
   const cols = useMemo(() => {
     const n = tiles.length;
     if (n <= 1) return "grid-cols-1";
-    if (n <= 4) return "grid-cols-2";
-    if (n <= 9) return "grid-cols-3";
-    return "grid-cols-4";
+    if (n <= 4) return "grid-cols-1 sm:grid-cols-2";
+    if (n <= 9) return "grid-cols-2 sm:grid-cols-3";
+    return "grid-cols-2 sm:grid-cols-4";
   }, [tiles.length]);
 
   return (
-    <div className={`grid ${cols} gap-3 h-full place-content-center`}>
+    <div className={`grid ${cols} gap-2 sm:gap-3 h-full place-content-center`}>
       {tiles.map((t) => (
-        <Tile key={t.participant.identity} trackRef={t} />
+        <Tile
+          key={t.participant.identity}
+          trackRef={t}
+          spotlighted={spotlight === t.participant.identity}
+          onSpotlight={() => onSpotlight(t.participant.identity)}
+        />
       ))}
+    </div>
+  );
+}
+
+function SpotlightLayout({
+  main,
+  others,
+  onSpotlight,
+}: {
+  main: TrackReferenceOrPlaceholder;
+  others: TrackReferenceOrPlaceholder[];
+  onSpotlight: (identity: string) => void;
+}) {
+  return (
+    <div className="flex flex-col lg:flex-row gap-3 h-full">
+      <div className="flex-1 min-h-0">
+        <Tile
+          trackRef={main}
+          spotlighted
+          onSpotlight={() => onSpotlight(main.participant.identity)}
+        />
+      </div>
+      {others.length > 0 && (
+        <div className="flex lg:flex-col gap-2 lg:w-52 shrink-0 overflow-auto">
+          {others.map((t) => (
+            <div key={t.participant.identity} className="w-40 lg:w-full shrink-0">
+              <Tile
+                trackRef={t}
+                compact
+                onSpotlight={() => onSpotlight(t.participant.identity)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -301,9 +655,13 @@ function ShareLayout({
 function Tile({
   trackRef,
   compact,
+  spotlighted,
+  onSpotlight,
 }: {
   trackRef: TrackReferenceOrPlaceholder;
   compact?: boolean;
+  spotlighted?: boolean;
+  onSpotlight?: () => void;
 }) {
   const p = trackRef.participant;
   const isSpeaking = useIsSpeaking(p);
@@ -317,10 +675,27 @@ function Tile({
 
   return (
     <div
-      className={`relative rounded-xl overflow-hidden bg-teams-stage aspect-video w-full h-full ring-2 transition-all ${
-        isSpeaking ? "ring-teams-purple" : "ring-transparent"
+      className={`group relative rounded-xl overflow-hidden bg-teams-stage aspect-video w-full h-full ring-2 transition-all ${
+        spotlighted
+          ? "ring-teams-purple"
+          : isSpeaking
+          ? "ring-teams-purple/60"
+          : "ring-transparent"
       }`}
     >
+      {onSpotlight && (
+        <button
+          onClick={onSpotlight}
+          title={spotlighted ? "Stop spotlight" : "Spotlight for everyone"}
+          className={`absolute top-2 right-2 z-10 rounded-md p-1.5 text-white transition-opacity ${
+            spotlighted
+              ? "bg-teams-purple"
+              : "bg-black/50 hover:bg-black/70 opacity-0 group-hover:opacity-100 focus:opacity-100"
+          }`}
+        >
+          <SpotlightIcon active={spotlighted} />
+        </button>
+      )}
       {hasVideo ? (
         <VideoTrack
           trackRef={trackRef as TrackReference}
@@ -613,7 +988,7 @@ function CallTimer() {
 
 function ctrlBtn(active: boolean) {
   return [
-    "flex flex-col items-center justify-center gap-0.5 rounded-xl px-3 py-2 text-[11px] font-medium transition min-w-[58px]",
+    "flex flex-col items-center justify-center gap-0.5 rounded-xl px-2.5 sm:px-3 py-2 text-[11px] font-medium transition min-w-[44px] sm:min-w-[58px]",
     active
       ? "bg-teams-purple text-white hover:bg-teams-purpleDark"
       : "bg-white/5 text-gray-200 hover:bg-white/15",
@@ -660,6 +1035,29 @@ const ShareIcon = () => (
     <path d="M8 21h8M12 17v4M9 11l3-3 3 3" />
   </svg>
 );
+const BlurIcon = () => (
+  <svg {...I({})}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 3v18M3.5 8.5h17M2.8 15.5h18.4M5 5.6h14M5 18.4h14" opacity="0.5" />
+  </svg>
+);
+const SpotlightIcon = ({ active }: { active?: boolean }) => (
+  <svg {...I({ width: 15, height: 15, fill: active ? "currentColor" : "none" })}>
+    <path d="M12 2l2.9 6.26L21 9.27l-4.5 4.38L17.8 21 12 17.27 6.2 21l1.3-7.35L3 9.27l6.1-1.01L12 2Z" />
+  </svg>
+);
+const SaveRecIcon = ({ active }: { active?: boolean }) =>
+  active ? (
+    <svg {...I({})}>
+      <circle cx="12" cy="12" r="9" />
+      <rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor" />
+    </svg>
+  ) : (
+    <svg {...I({})}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="M7 10l5 5 5-5M12 15V3" />
+    </svg>
+  );
 const ChatIcon = () => (
   <svg {...I({})}>
     <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5Z" />
@@ -674,6 +1072,16 @@ const ReactIcon = () => (
   <svg {...I({})}>
     <circle cx="12" cy="12" r="10" />
     <path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" />
+  </svg>
+);
+const RecordIcon = ({ active }: { active?: boolean }) => (
+  <svg {...I({})}>
+    <circle cx="12" cy="12" r="9" />
+    {active ? (
+      <rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor" />
+    ) : (
+      <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none" />
+    )}
   </svg>
 );
 const LeaveIcon = () => (

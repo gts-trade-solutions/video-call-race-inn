@@ -5,7 +5,7 @@ const COOKIE_NAME = "vct_session";
 const encoder = new TextEncoder();
 
 // Routes that do not require authentication.
-const PUBLIC_PATHS = ["/login", "/register"];
+const PUBLIC_PATHS = ["/login", "/register", "/forgot"];
 
 async function isValidSession(token: string | undefined): Promise<boolean> {
   if (!token) return false;

@@ -18,6 +18,22 @@ const BLOCKED_EXT = new Set([
   "php", "phtml", "asp", "aspx", "jsp", "htaccess",
 ]);
 
+// Exact MIME types that render/execute in the browser. Matched precisely (not
+// as substrings) so Office files — whose types contain "xml" via
+// "openxmlformats" (e.g. .docx/.xlsx/.pptx) — are NOT wrongly blocked.
+const BLOCKED_TYPES = new Set([
+  "text/html",
+  "application/xhtml+xml",
+  "image/svg+xml",
+  "text/xml",
+  "application/xml",
+  "text/javascript",
+  "application/javascript",
+  "application/x-javascript",
+  "application/ecmascript",
+  "text/ecmascript",
+]);
+
 // Streams the raw request body straight to disk so large (up to 1 GB) files
 // don't get buffered in memory. The client sends the file as the body with
 // ?name= and ?type= query params.
@@ -34,7 +50,9 @@ export async function POST(req: Request) {
     const type = searchParams.get("type") || "application/octet-stream";
 
     const ext = (rawName.split(".").pop() || "").toLowerCase();
-    if (BLOCKED_EXT.has(ext) || /(html|svg|xml|javascript)/i.test(type)) {
+    // Compare just the MIME essence (drop any "; charset=..." parameters).
+    const baseType = type.split(";")[0].trim().toLowerCase();
+    if (BLOCKED_EXT.has(ext) || BLOCKED_TYPES.has(baseType)) {
       return NextResponse.json(
         { error: "This file type isn't allowed." },
         { status: 415 }

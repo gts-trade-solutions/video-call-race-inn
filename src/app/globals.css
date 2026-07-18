@@ -46,6 +46,12 @@ body {
   font-size: 11px;
   line-height: 1;
 }
+/* On phones, drop the button labels so the control bar fits (icon-only). */
+@media (max-width: 640px) {
+  .ctrl-label {
+    display: none;
+  }
+}
 
 /* Floating emoji reactions rise + fade */
 @keyframes reaction-rise {
