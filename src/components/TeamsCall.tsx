@@ -23,6 +23,12 @@ import {
 } from "@livekit/track-processors";
 
 type Panel = "none" | "chat" | "people";
+type WaitingPerson = {
+  userId: number;
+  name: string;
+  avatarUrl: string | null;
+  since: string;
+};
 type CallChatMsg = {
   id: string;
   sender: string;
@@ -31,7 +37,13 @@ type CallChatMsg = {
   mine: boolean;
 };
 
-export default function TeamsCall({ room }: { room: string }) {
+export default function TeamsCall({
+  room,
+  isHost = false,
+}: {
+  room: string;
+  isHost?: boolean;
+}) {
   const [panel, setPanel] = useState<Panel>("none");
   const [copied, setCopied] = useState(false);
   const participants = useParticipants();
@@ -247,6 +259,61 @@ export default function TeamsCall({ room }: { room: string }) {
   // Local (in-browser) recording that saves an MP4/WebM to the user's device.
   const localRec = useLocalRecorder(room);
 
+  // ----- Waiting room: host sees who's knocking and admits/denies -----
+  const [waiting, setWaiting] = useState<WaitingPerson[]>([]);
+
+  const refreshLobby = useCallback(async () => {
+    if (!isHost) return;
+    try {
+      const res = await fetch(
+        `/api/livekit/lobby?room=${encodeURIComponent(room)}`
+      );
+      if (res.ok) {
+        const d = await res.json();
+        setWaiting(Array.isArray(d.waiting) ? d.waiting : []);
+      }
+    } catch {
+      /* ignore transient errors */
+    }
+  }, [isHost, room]);
+
+  useEffect(() => {
+    if (!isHost) return;
+    refreshLobby();
+    const t = setInterval(refreshLobby, 4000);
+    return () => clearInterval(t);
+  }, [isHost, refreshLobby]);
+
+  const decideLobby = useCallback(
+    async (userId: number, action: "admit" | "deny") => {
+      setWaiting((w) => w.filter((x) => x.userId !== userId)); // optimistic
+      try {
+        await fetch("/api/livekit/lobby", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ room, userId, action }),
+        });
+      } catch {
+        /* next poll reconciles */
+      }
+    },
+    [room]
+  );
+
+  const admitAll = useCallback(async () => {
+    const ids = waiting.map((w) => w.userId);
+    setWaiting([]);
+    await Promise.all(
+      ids.map((userId) =>
+        fetch("/api/livekit/lobby", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ room, userId, action: "admit" }),
+        }).catch(() => {})
+      )
+    );
+  }, [waiting, room]);
+
   function copyInvite() {
     const link = typeof window !== "undefined" ? window.location.href : room;
     navigator.clipboard?.writeText(link).then(
@@ -271,6 +338,15 @@ export default function TeamsCall({ room }: { room: string }) {
       <RoomAudioRenderer />
       <ConnectionStateToast />
       <FloatingReactions />
+
+      {isHost && waiting.length > 0 && (
+        <LobbyBanner
+          waiting={waiting}
+          onAdmit={(id) => decideLobby(id, "admit")}
+          onDeny={(id) => decideLobby(id, "deny")}
+          onAdmitAll={admitAll}
+        />
+      )}
 
       {/* ---------- Top bar ---------- */}
       <header className="h-14 shrink-0 flex items-center justify-between px-4 bg-teams-darker border-b border-white/10">
@@ -351,8 +427,8 @@ export default function TeamsCall({ room }: { room: string }) {
       </div>
 
       {/* ---------- Control pill ---------- */}
-      <footer className="shrink-0 flex justify-start sm:justify-center px-2 pb-3 pt-2 overflow-x-auto">
-        <div className="flex items-center gap-1.5 bg-teams-stage/95 backdrop-blur rounded-2xl px-2 sm:px-3 py-2 shadow-2xl border border-white/10 mx-auto">
+      <footer className="shrink-0 flex justify-center px-2 pb-3 pt-2">
+        <div className="flex flex-wrap items-center justify-center gap-1.5 bg-teams-stage/95 backdrop-blur rounded-2xl px-2 sm:px-3 py-2 shadow-2xl border border-white/10 max-w-full">
           <TrackToggle
             source={Track.Source.Microphone}
             showIcon={false}
@@ -854,6 +930,59 @@ function PeoplePanel({
   );
 }
 
+/* =====================  Waiting room banner  ===================== */
+
+function LobbyBanner({
+  waiting,
+  onAdmit,
+  onDeny,
+  onAdmitAll,
+}: {
+  waiting: WaitingPerson[];
+  onAdmit: (userId: number) => void;
+  onDeny: (userId: number) => void;
+  onAdmitAll: () => void;
+}) {
+  return (
+    <div className="fixed top-16 right-3 sm:right-4 z-40 w-80 max-w-[92vw] bg-teams-stage border border-white/15 rounded-xl shadow-2xl overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-teams-purple/20 border-b border-white/10">
+        <span className="text-sm font-semibold flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-teams-purple animate-pulse" />
+          {waiting.length} waiting to join
+        </span>
+        {waiting.length > 1 && (
+          <button
+            onClick={onAdmitAll}
+            className="text-xs font-medium text-teams-purple hover:underline"
+          >
+            Admit all
+          </button>
+        )}
+      </div>
+      <div className="max-h-64 overflow-y-auto divide-y divide-white/5">
+        {waiting.map((p) => (
+          <div key={p.userId} className="flex items-center gap-2 px-3 py-2">
+            <Avatar name={p.name} size={32} />
+            <div className="flex-1 min-w-0 text-sm truncate">{p.name}</div>
+            <button
+              onClick={() => onAdmit(p.userId)}
+              className="text-xs font-medium bg-teams-purple hover:bg-teams-purpleDark text-white rounded-md px-2.5 py-1.5"
+            >
+              Admit
+            </button>
+            <button
+              onClick={() => onDeny(p.userId)}
+              className="text-xs font-medium bg-white/10 hover:bg-white/20 text-white rounded-md px-2.5 py-1.5"
+            >
+              Deny
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PanelShell({
   title,
   onClose,
@@ -902,7 +1031,7 @@ function ReactionButton() {
   return (
     <div className="relative">
       {open && (
-        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 flex gap-1 bg-teams-stage border border-white/10 rounded-xl px-2 py-1.5 shadow-xl">
+        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-30 flex gap-1 bg-teams-stage border border-white/10 rounded-xl px-2 py-1.5 shadow-xl">
           {EMOJIS.map((e) => (
             <button
               key={e}

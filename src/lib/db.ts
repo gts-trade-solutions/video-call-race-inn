@@ -224,6 +224,34 @@ export function ensureSchema(): Promise<void> {
         if ((e as { errno?: number }).errno !== 1060) throw e;
       }
 
+      // Migration: waiting-room toggle (1 = non-hosts must be admitted).
+      try {
+        await pool.query(
+          "ALTER TABLE meetings ADD COLUMN lobby_enabled TINYINT(1) NOT NULL DEFAULT 1"
+        );
+      } catch (e) {
+        if ((e as { errno?: number }).errno !== 1060) throw e;
+      }
+
+      // Waiting-room admissions: one row per (meeting, user).
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS lobby_admissions (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          meeting_id INT NOT NULL,
+          user_id INT NOT NULL,
+          status ENUM('waiting','admitted','denied') NOT NULL DEFAULT 'waiting',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uniq_admission (meeting_id, user_id),
+          INDEX idx_adm_meeting (meeting_id),
+          CONSTRAINT fk_adm_meeting FOREIGN KEY (meeting_id)
+            REFERENCES meetings(id) ON DELETE CASCADE,
+          CONSTRAINT fk_adm_user FOREIGN KEY (user_id)
+            REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
       // Password reset codes — we store only a hash of the 4-digit PIN.
       await pool.query(`
         CREATE TABLE IF NOT EXISTS password_resets (

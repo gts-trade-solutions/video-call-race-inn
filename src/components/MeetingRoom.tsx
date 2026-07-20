@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   LiveKitRoom,
@@ -10,7 +10,14 @@ import {
 import { RoomOptions, VideoPresets } from "livekit-client";
 import TeamsCall from "@/components/TeamsCall";
 
-type Phase = "prejoin" | "connecting" | "in-call" | "left" | "error";
+type Phase =
+  | "prejoin"
+  | "connecting"
+  | "waiting"
+  | "denied"
+  | "in-call"
+  | "left"
+  | "error";
 
 export default function MeetingRoom({
   room,
@@ -26,6 +33,7 @@ export default function MeetingRoom({
   const [choices, setChoices] = useState<LocalUserChoices | null>(null);
   const [token, setToken] = useState<string>("");
   const [serverUrl, setServerUrl] = useState<string>("");
+  const [isHost, setIsHost] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -64,38 +72,96 @@ export default function MeetingRoom({
     };
   }, [choices]);
 
+  type TokenResult = {
+    error?: string;
+    denied?: boolean;
+    waiting?: boolean;
+    token?: string;
+    url?: string;
+    isHost?: boolean;
+  };
+
+  const requestToken = useCallback(async (): Promise<{
+    ok: boolean;
+    data: TokenResult;
+  }> => {
+    const res = await fetch(
+      `/api/livekit/token?room=${encodeURIComponent(room)}`
+    );
+    const data = (await res.json()) as TokenResult;
+    return { ok: res.ok, data };
+  }, [room]);
+
+  // Turns a token response into the next phase (may be waiting/denied/in-call).
+  const applyTokenResult = useCallback(
+    (ok: boolean, data: TokenResult): Phase => {
+      if (!ok) {
+        setError(data?.error || "Could not join the meeting.");
+        return "error";
+      }
+      if (data.denied) return "denied";
+      if (data.waiting) return "waiting";
+      if (!data.token || !data.url) {
+        setError(
+          "LiveKit server URL is not set. Add NEXT_PUBLIC_LIVEKIT_URL in .env.local"
+        );
+        return "error";
+      }
+      setToken(data.token);
+      setServerUrl(data.url);
+      setIsHost(!!data.isHost);
+      return "in-call";
+    },
+    []
+  );
+
   const handlePreJoinSubmit = useCallback(
     async (values: LocalUserChoices) => {
       setChoices(values);
       setPhase("connecting");
       setError(null);
       try {
-        const res = await fetch(
-          `/api/livekit/token?room=${encodeURIComponent(room)}`
-        );
-        const data = await res.json();
-        if (!res.ok) {
-          setError(data.error || "Could not join the meeting.");
-          setPhase("error");
-          return;
-        }
-        if (!data.url) {
-          setError(
-            "LiveKit server URL is not set. Add NEXT_PUBLIC_LIVEKIT_URL in .env.local"
-          );
-          setPhase("error");
-          return;
-        }
-        setToken(data.token);
-        setServerUrl(data.url);
-        setPhase("in-call");
+        const { ok, data } = await requestToken();
+        setPhase(applyTokenResult(ok, data));
       } catch {
         setError("Network error while joining.");
         setPhase("error");
       }
     },
-    [room]
+    [requestToken, applyTokenResult]
   );
+
+  // Denied guest asks to join again — reset our request to "waiting" so the
+  // host is re-notified, then go back to the waiting screen.
+  const askAgain = useCallback(async () => {
+    setPhase("connecting");
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/livekit/token?room=${encodeURIComponent(room)}&reknock=1`
+      );
+      const data = (await res.json()) as TokenResult;
+      setPhase(applyTokenResult(res.ok, data));
+    } catch {
+      setError("Network error while joining.");
+      setPhase("error");
+    }
+  }, [room, applyTokenResult]);
+
+  // While waiting in the lobby, poll until the host admits (or denies) us.
+  useEffect(() => {
+    if (phase !== "waiting") return;
+    const t = setInterval(async () => {
+      try {
+        const { ok, data } = await requestToken();
+        const next = applyTokenResult(ok, data);
+        if (next !== "waiting") setPhase(next);
+      } catch {
+        /* keep waiting through transient errors */
+      }
+    }, 3000);
+    return () => clearInterval(t);
+  }, [phase, requestToken, applyTokenResult]);
 
   // ----- Pre-join lobby -----
   if (phase === "prejoin" || phase === "connecting") {
@@ -137,6 +203,45 @@ export default function MeetingRoom({
           ← Back to dashboard
         </button>
       </div>
+    );
+  }
+
+  // ----- Waiting room -----
+  if (phase === "waiting") {
+    return (
+      <div className="min-h-screen bg-teams-dark flex items-center justify-center px-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
+          <div className="mx-auto mb-5 w-12 h-12 rounded-full border-4 border-teams-purple/25 border-t-teams-purple animate-spin" />
+          <h1 className="text-xl font-semibold text-teams-dark">
+            Waiting to be admitted
+          </h1>
+          <p className="text-teams-gray mt-2 mb-6">
+            The host will let you in shortly. Keep this tab open — you&apos;ll
+            join automatically once you&apos;re admitted.
+          </p>
+          <SecondaryBtn onClick={() => router.push("/dashboard")}>
+            Cancel
+          </SecondaryBtn>
+        </div>
+      </div>
+    );
+  }
+
+  // ----- Denied -----
+  if (phase === "denied") {
+    return (
+      <CenteredCard
+        title="You weren't admitted"
+        body="The host declined your request to join this meeting."
+        actions={
+          <>
+            <PrimaryBtn onClick={askAgain}>Ask again</PrimaryBtn>
+            <SecondaryBtn onClick={() => router.push("/dashboard")}>
+              Dashboard
+            </SecondaryBtn>
+          </>
+        }
+      />
     );
   }
 
@@ -195,7 +300,7 @@ export default function MeetingRoom({
         }}
         style={{ height: "100%" }}
       >
-        <TeamsCall room={room} />
+        <TeamsCall room={room} isHost={isHost} />
       </LiveKitRoom>
     </div>
   );
