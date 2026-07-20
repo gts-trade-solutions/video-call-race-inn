@@ -349,22 +349,24 @@ export default function TeamsCall({
       )}
 
       {/* ---------- Top bar ---------- */}
-      <header className="h-14 shrink-0 flex items-center justify-between px-4 bg-teams-darker border-b border-white/10">
-        <div className="flex items-center gap-3">
-          <div className="bg-white rounded px-1.5 py-1 flex items-center">
+      <header className="h-14 shrink-0 flex items-center justify-between gap-2 px-3 sm:px-4 bg-teams-darker border-b border-white/10">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="bg-white rounded px-1.5 py-1 flex items-center shrink-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/logo.svg"
               alt="Race Innovations"
-              className="h-7 w-auto object-contain"
+              className="h-5 sm:h-7 w-auto object-contain"
             />
           </div>
-          <div className="leading-tight">
-            <div className="text-sm font-semibold">Meeting</div>
-            <div className="text-xs text-gray-400 font-mono">{room}</div>
+          <div className="leading-tight min-w-0">
+            <div className="text-sm font-semibold leading-tight">Meeting</div>
+            <div className="text-xs text-gray-400 font-mono truncate">
+              {room}
+            </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {recording && (
             <span className="flex items-center gap-1.5 text-xs font-semibold text-red-300 bg-red-500/15 border border-red-500/40 rounded-md px-2 py-1">
               <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
@@ -374,7 +376,7 @@ export default function TeamsCall({
           <CallTimer />
           <button
             onClick={copyInvite}
-            className="flex items-center gap-1.5 text-sm bg-white/10 hover:bg-white/20 rounded-md px-3 py-1.5 transition"
+            className="flex items-center gap-1.5 text-sm bg-white/10 hover:bg-white/20 rounded-md px-2.5 sm:px-3 py-1.5 transition shrink-0"
             title="Copy invite link"
           >
             <CopyIcon />

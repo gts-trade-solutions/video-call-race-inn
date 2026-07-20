@@ -285,7 +285,7 @@ export default function MeetingRoom({
 
   // ----- In call -----
   return (
-    <div data-lk-theme="default" className="h-screen bg-teams-dark">
+    <div data-lk-theme="default" className="h-dvh bg-teams-dark">
       <LiveKitRoom
         token={token}
         serverUrl={serverUrl}
