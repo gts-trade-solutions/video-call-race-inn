@@ -334,7 +334,7 @@ export default function TeamsCall({
     : cameraTiles;
 
   return (
-    <div className="flex flex-col h-full bg-teams-darker text-white">
+    <div className="flex flex-col h-full bg-teams-darker text-white overflow-x-hidden">
       <RoomAudioRenderer />
       <ConnectionStateToast />
       <FloatingReactions />
@@ -388,7 +388,7 @@ export default function TeamsCall({
       </header>
 
       {/* ---------- Body: stage + side panel ---------- */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 relative">
         <main className="flex-1 min-w-0 p-3 sm:p-4">
           {isSharing ? (
             <ShareLayout
@@ -411,7 +411,7 @@ export default function TeamsCall({
         </main>
 
         {panel !== "none" && (
-          <aside className="w-full max-w-sm sm:w-80 shrink-0 bg-teams-stage border-l border-white/10 flex flex-col">
+          <aside className="absolute inset-0 z-30 sm:static sm:z-auto w-full sm:w-80 shrink-0 bg-teams-stage sm:border-l border-white/10 flex flex-col">
             {panel === "chat" ? (
               <ChatPanel
                 messages={chatMsgs}
