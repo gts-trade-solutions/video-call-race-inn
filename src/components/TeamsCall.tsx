@@ -512,6 +512,8 @@ export default function TeamsCall({
           <TrackToggle
             source={Track.Source.Microphone}
             showIcon={false}
+            aria-label="Toggle microphone"
+            title="Microphone"
             className={ctrlBtn(isMicrophoneEnabled)}
           >
             {isMicrophoneEnabled ? <MicIcon /> : <MicOffIcon />}
@@ -521,6 +523,8 @@ export default function TeamsCall({
           <TrackToggle
             source={Track.Source.Camera}
             showIcon={false}
+            aria-label="Toggle camera"
+            title="Camera"
             className={ctrlBtn(isCameraEnabled)}
           >
             {isCameraEnabled ? <CamIcon /> : <CamOffIcon />}
@@ -540,6 +544,8 @@ export default function TeamsCall({
           <TrackToggle
             source={Track.Source.ScreenShare}
             showIcon={false}
+            aria-label="Share screen"
+            title="Share screen"
             captureOptions={{ audio: true, selfBrowserSurface: "include" }}
             className={ctrlBtn(isScreenShareEnabled)}
           >
@@ -588,6 +594,8 @@ export default function TeamsCall({
 
           <button
             onClick={() => setPanel(panel === "chat" ? "none" : "chat")}
+            aria-label="Chat"
+            title="Chat"
             className={ctrlBtn(panel === "chat") + " relative"}
           >
             <ChatIcon />
@@ -601,15 +609,23 @@ export default function TeamsCall({
 
           <button
             onClick={() => setPanel(panel === "people" ? "none" : "people")}
+            aria-label="People"
+            title="People"
             className={ctrlBtn(panel === "people")}
           >
             <PeopleIcon />
             <span className="ctrl-label">People ({participants.length})</span>
           </button>
 
-          <DisconnectButton className="flex flex-col items-center justify-center gap-0.5 h-11 w-11 rounded-full sm:h-auto sm:w-auto sm:rounded-xl sm:px-4 sm:py-2 bg-red-600 hover:bg-red-700 text-white text-[11px] font-medium transition ml-1">
+          {/* `!` overrides LiveKit's .lk-disconnect-button styles, which
+              otherwise render this as a red-outlined transparent button. */}
+          <DisconnectButton
+            aria-label="Leave meeting"
+            title="Leave meeting"
+            className="flex flex-col items-center justify-center gap-0.5 h-11 w-11 rounded-full sm:h-auto sm:w-auto sm:rounded-xl sm:px-4 sm:py-2 !bg-red-600 hover:!bg-red-700 !text-white !border-0 text-[11px] font-medium transition ml-1"
+          >
             <LeaveIcon />
-            <span>Leave</span>
+            <span className="ctrl-label">Leave</span>
           </DisconnectButton>
         </div>
       </footer>
@@ -827,11 +843,11 @@ function GridStage({
   }, [tiles.length]);
 
   return (
-    // On phones the rows share the full stage height (auto-rows-fr) so the
-    // grid fills the screen. On sm+ we keep the original centred, 16:9 look.
-    <div
-      className={`grid ${cols} gap-2 sm:gap-3 h-full auto-rows-fr sm:auto-rows-min sm:place-content-center`}
-    >
+    // auto-rows-fr at every size: rows share the stage height equally, so the
+    // grid can never grow taller than the stage. (Letting rows size themselves
+    // from a 16:9 tile overflowed the viewport on desktop — the header got
+    // pushed off and the last row hid behind the control bar.)
+    <div className={`grid ${cols} gap-2 sm:gap-3 h-full auto-rows-fr`}>
       {tiles.map((t) => (
         <Tile
           key={t.participant.identity}
@@ -941,10 +957,9 @@ function Tile({
   return (
     <div
       className={`group tile-fill relative rounded-xl overflow-hidden bg-teams-stage w-full ring-2 transition-all ${
-        fill
-          ? // Fill the cell on phones; restore the 16:9 look from sm up.
-            "h-full sm:h-auto sm:aspect-video"
-          : "aspect-video h-full"
+        // `fill` tiles take exactly their grid cell (min-h-0 lets them shrink
+        // instead of forcing the grid taller than the stage).
+        fill ? "h-full min-h-0" : "aspect-video h-full"
       } ${
         spotlighted
           ? "ring-teams-purple"
@@ -1239,6 +1254,8 @@ function ReactionButton() {
       )}
       <button
         onClick={() => setOpen((o) => !o)}
+        aria-label="Reactions"
+        title="Reactions"
         className={ctrlBtn(open)}
       >
         <ReactIcon />
