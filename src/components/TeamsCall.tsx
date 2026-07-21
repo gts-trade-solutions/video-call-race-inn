@@ -197,23 +197,41 @@ export default function TeamsCall({
   }, [localParticipant]);
 
   const applyBlur = useCallback(
-    async (on: boolean) => {
+    async (on: boolean): Promise<boolean> => {
       const track = camTrack();
-      if (!track) return; // camera off — will apply when it turns on
+      if (!track) return true; // camera off — will apply when it turns on
       try {
         if (on) {
           if (!processorRef.current) {
             processorRef.current = BackgroundProcessor({
               mode: "background-blur",
               blurRadius: 12,
+              // Serve the segmentation model and WASM from our own origin.
+              // The defaults hit jsdelivr + storage.googleapis.com at runtime;
+              // if those are blocked or time out the processor still starts but
+              // renders BLACK FRAMES instead of blurred video.
+              assetPaths: {
+                tasksVisionFileSet: "/mediapipe/wasm",
+                modelAssetPath: "/mediapipe/selfie_segmenter.tflite",
+              },
             });
           }
           await track.setProcessor(processorRef.current);
         } else {
           await track.stopProcessor();
         }
+        return true;
       } catch (e) {
         console.error("background blur error:", e);
+        // Never leave the user staring at a dead/!black preview — drop back to
+        // the raw camera track.
+        try {
+          await track.stopProcessor();
+        } catch {
+          /* nothing else we can do */
+        }
+        processorRef.current = null;
+        return false;
       }
     },
     [camTrack]
@@ -227,9 +245,16 @@ export default function TeamsCall({
     }
     setBlurBusy(true);
     const next = !blurOn;
-    await applyBlur(next);
-    setBlurOn(next);
+    const ok = await applyBlur(next);
+    // Only flip the button if it actually worked, so the UI can't claim blur
+    // is on while the camera is black or unprocessed.
+    setBlurOn(ok ? next : false);
     setBlurBusy(false);
+    if (!ok && next) {
+      alert(
+        "Couldn't start background blur on this device. Your camera has been left unblurred."
+      );
+    }
   }, [blurBusy, blurOn, applyBlur]);
 
   // Re-apply blur to a fresh camera track after the camera is toggled off/on.
@@ -349,6 +374,30 @@ export default function TeamsCall({
     ? cameraTiles.filter((t) => t.participant.identity !== spotlight)
     : cameraTiles;
 
+  // ----- Teams-style phone layout: one big speaker + self PiP -----
+  const isMobile = useIsMobile();
+  const selfTile = cameraTiles.find((t) => t.participant.isLocal);
+  const remoteTiles = cameraTiles.filter((t) => !t.participant.isLocal);
+  // Who gets the big tile: an explicit spotlight wins, otherwise whoever is
+  // speaking, otherwise the most recent speaker, otherwise the first remote.
+  const dominantRemote =
+    (spotlightTile && !spotlightTile.participant.isLocal
+      ? spotlightTile
+      : undefined) ??
+    [...remoteTiles].sort((a, b) => {
+      const sp = Number(b.participant.isSpeaking) - Number(a.participant.isSpeaking);
+      if (sp !== 0) return sp;
+      return (
+        (b.participant.lastSpokeAt?.getTime() ?? 0) -
+        (a.participant.lastSpokeAt?.getTime() ?? 0)
+      );
+    })[0];
+  // Alone in the call → show yourself big rather than an empty stage.
+  const mobileMain = dominantRemote ?? selfTile;
+  const mobileOthers = remoteTiles.filter(
+    (t) => t.participant.identity !== mobileMain?.participant.identity
+  );
+
   return (
     <div className="flex flex-col h-full bg-teams-darker text-white overflow-x-hidden">
       <RoomAudioRenderer />
@@ -410,6 +459,19 @@ export default function TeamsCall({
             <ShareLayout
               screenShares={screenShares}
               cameraTiles={cameraTiles}
+            />
+          ) : isMobile && mobileMain ? (
+            <MobileStage
+              main={mobileMain}
+              self={
+                // Don't repeat yourself in the PiP if you're already the big tile.
+                selfTile &&
+                selfTile.participant.identity !== mobileMain.participant.identity
+                  ? selfTile
+                  : undefined
+              }
+              others={mobileOthers}
+              onSpotlight={toggleSpotlight}
             />
           ) : spotlightTile ? (
             <SpotlightLayout
@@ -494,7 +556,8 @@ export default function TeamsCall({
               disabled={recBusy}
               title={recording ? "Stop recording" : "Record this meeting to S3"}
               className={[
-                "flex flex-col items-center justify-center gap-0.5 rounded-xl px-2.5 sm:px-3 py-2 text-[11px] font-medium transition min-w-[44px] sm:min-w-[58px] disabled:opacity-50",
+                CTRL_SHAPE,
+                "disabled:opacity-50",
                 recording
                   ? "bg-red-600 text-white hover:bg-red-700"
                   : "bg-white/5 text-gray-200 hover:bg-white/15",
@@ -511,7 +574,7 @@ export default function TeamsCall({
             onClick={() => (localRec.recording ? localRec.stop() : localRec.start())}
             title="Record to your device — pick 'This tab' and enable tab audio"
             className={[
-              "flex flex-col items-center justify-center gap-0.5 rounded-xl px-3 py-2 text-[11px] font-medium transition min-w-[58px]",
+              CTRL_SHAPE,
               localRec.recording
                 ? "bg-red-600 text-white hover:bg-red-700"
                 : "bg-white/5 text-gray-200 hover:bg-white/15",
@@ -544,7 +607,7 @@ export default function TeamsCall({
             <span className="ctrl-label">People ({participants.length})</span>
           </button>
 
-          <DisconnectButton className="flex flex-col items-center justify-center gap-0.5 rounded-xl px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-[11px] font-medium transition ml-1">
+          <DisconnectButton className="flex flex-col items-center justify-center gap-0.5 h-11 w-11 rounded-full sm:h-auto sm:w-auto sm:rounded-xl sm:px-4 sm:py-2 bg-red-600 hover:bg-red-700 text-white text-[11px] font-medium transition ml-1">
             <LeaveIcon />
             <span>Leave</span>
           </DisconnectButton>
@@ -665,7 +728,82 @@ function useLocalRecorder(room: string) {
   return { recording, start, stop };
 }
 
+/* =====================  Responsive helper  ===================== */
+
+/** True below Tailwind's `sm` breakpoint (640px) — i.e. phones. */
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const apply = () => setIsMobile(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  return isMobile;
+}
+
 /* =====================  Stage layouts  ===================== */
+
+/**
+ * Teams-style phone layout: the active speaker fills the screen, your own
+ * camera sits in a small floating PiP, and any other participants run along a
+ * compact strip at the top.
+ */
+function MobileStage({
+  main,
+  self,
+  others,
+  onSpotlight,
+}: {
+  main: TrackReferenceOrPlaceholder;
+  self?: TrackReferenceOrPlaceholder;
+  others: TrackReferenceOrPlaceholder[];
+  onSpotlight: (identity: string) => void;
+}) {
+  return (
+    <div className="relative h-full w-full">
+      <Tile
+        trackRef={main}
+        fill
+        onSpotlight={() => onSpotlight(main.participant.identity)}
+      />
+
+      {others.length > 0 && (
+        <div className="absolute top-2 left-2 right-2 flex gap-2 overflow-x-auto pb-1">
+          {others.map((t) => (
+            <div key={t.participant.identity} className="w-20 shrink-0">
+              <Tile trackRef={t} compact />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {self && <SelfPip trackRef={self} />}
+    </div>
+  );
+}
+
+/** Small floating self-view, like the Teams mobile PiP. */
+function SelfPip({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
+  const { isMuted: camMuted } = useTrackMutedIndicator(trackRef);
+  const hasVideo = !!trackRef.publication && !camMuted;
+  const name = trackRef.participant.name || trackRef.participant.identity;
+  return (
+    <div className="tile-fill absolute bottom-3 right-3 w-24 h-32 rounded-xl overflow-hidden bg-teams-stage shadow-2xl ring-1 ring-white/25">
+      {hasVideo ? (
+        <VideoTrack
+          trackRef={trackRef as TrackReference}
+          className="w-full h-full object-cover -scale-x-100"
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <Avatar name={name} size={36} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 function GridStage({
   tiles,
@@ -679,17 +817,26 @@ function GridStage({
   const cols = useMemo(() => {
     const n = tiles.length;
     if (n <= 1) return "grid-cols-1";
-    if (n <= 4) return "grid-cols-1 sm:grid-cols-2";
+    // 2 people still stack on a phone (wider tiles read better than a tiny
+    // side-by-side pair); 3+ go to two columns so each tile is portrait-ish,
+    // which matches phone-camera video instead of leaving big empty bars.
+    if (n <= 2) return "grid-cols-1 sm:grid-cols-2";
+    if (n <= 4) return "grid-cols-2";
     if (n <= 9) return "grid-cols-2 sm:grid-cols-3";
     return "grid-cols-2 sm:grid-cols-4";
   }, [tiles.length]);
 
   return (
-    <div className={`grid ${cols} gap-2 sm:gap-3 h-full place-content-center`}>
+    // On phones the rows share the full stage height (auto-rows-fr) so the
+    // grid fills the screen. On sm+ we keep the original centred, 16:9 look.
+    <div
+      className={`grid ${cols} gap-2 sm:gap-3 h-full auto-rows-fr sm:auto-rows-min sm:place-content-center`}
+    >
       {tiles.map((t) => (
         <Tile
           key={t.participant.identity}
           trackRef={t}
+          fill
           spotlighted={spotlight === t.participant.identity}
           onSpotlight={() => onSpotlight(t.participant.identity)}
         />
@@ -712,6 +859,7 @@ function SpotlightLayout({
       <div className="flex-1 min-h-0">
         <Tile
           trackRef={main}
+          fill
           spotlighted
           onSpotlight={() => onSpotlight(main.participant.identity)}
         />
@@ -769,11 +917,14 @@ function ShareLayout({
 function Tile({
   trackRef,
   compact,
+  fill,
   spotlighted,
   onSpotlight,
 }: {
   trackRef: TrackReferenceOrPlaceholder;
   compact?: boolean;
+  /** Fill the grid cell (mobile stage) instead of forcing a 16:9 box. */
+  fill?: boolean;
   spotlighted?: boolean;
   onSpotlight?: () => void;
 }) {
@@ -789,7 +940,12 @@ function Tile({
 
   return (
     <div
-      className={`group relative rounded-xl overflow-hidden bg-teams-stage aspect-video w-full h-full ring-2 transition-all ${
+      className={`group tile-fill relative rounded-xl overflow-hidden bg-teams-stage w-full ring-2 transition-all ${
+        fill
+          ? // Fill the cell on phones; restore the 16:9 look from sm up.
+            "h-full sm:h-auto sm:aspect-video"
+          : "aspect-video h-full"
+      } ${
         spotlighted
           ? "ring-teams-purple"
           : isSpeaking
@@ -1153,9 +1309,15 @@ function CallTimer() {
 
 /* =====================  Helpers & icons  ===================== */
 
+// Round icon buttons on phones (Teams-style); labelled pills from sm up.
+const CTRL_SHAPE =
+  "flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition " +
+  "h-11 w-11 rounded-full " +
+  "sm:h-auto sm:w-auto sm:rounded-xl sm:px-3 sm:py-2 sm:min-w-[58px]";
+
 function ctrlBtn(active: boolean) {
   return [
-    "flex flex-col items-center justify-center gap-0.5 rounded-xl px-2.5 sm:px-3 py-2 text-[11px] font-medium transition min-w-[44px] sm:min-w-[58px]",
+    CTRL_SHAPE,
     active
       ? "bg-teams-purple text-white hover:bg-teams-purpleDark"
       : "bg-white/5 text-gray-200 hover:bg-white/15",

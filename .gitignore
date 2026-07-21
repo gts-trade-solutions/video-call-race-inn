@@ -11,3 +11,5 @@ next-env.d.ts
 *.tsbuildinfo
 /public/uploads
 .claude/
+# Copied from node_modules by scripts/copy-mediapipe.mjs (~19 MB of .wasm)
+/public/mediapipe/wasm

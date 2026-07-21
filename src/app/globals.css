@@ -77,3 +77,13 @@ body {
   width: 100%;
   height: 100%;
 }
+
+/* LiveKit ships `.lk-participant-media-video[data-lk-orientation=portrait]
+   { object-fit: contain }`, whose specificity beats our `object-cover` class.
+   That pillarboxes phone-camera (portrait) video inside a tile, wasting most
+   of the screen on mobile. Scope an override to our own tiles so camera video
+   fills them — screen share is deliberately left alone, it must stay
+   `contain` so nothing is cropped off a shared screen. */
+.tile-fill .lk-participant-media-video[data-lk-orientation="portrait"] {
+  object-fit: cover;
+}
