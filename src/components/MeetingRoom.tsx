@@ -154,6 +154,9 @@ export default function MeetingRoom({
     const t = setInterval(async () => {
       try {
         const { ok, data } = await requestToken();
+        // A transient server error must not eject us from the lobby — only act
+        // on a successful response.
+        if (!ok) return;
         const next = applyTokenResult(ok, data);
         if (next !== "waiting") setPhase(next);
       } catch {

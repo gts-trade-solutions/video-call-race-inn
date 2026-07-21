@@ -76,13 +76,18 @@ export default function TeamsCall({
   const { send: sendChatData } = useDataChannel("chat", (msg) => {
     try {
       const d = JSON.parse(new TextDecoder().decode(msg.payload));
+      // Attribute the message to the authenticated sender from LiveKit, never
+      // to a name in the payload — otherwise anyone can impersonate anyone.
+      const sender =
+        msg.from?.name || msg.from?.identity || "Unknown";
+      const ts = typeof d.ts === "number" ? d.ts : Date.now();
       setChatMsgs((prev) => [
         ...prev,
         {
-          id: `${d.ts}-${d.sender}-${prev.length}`,
-          sender: d.sender,
-          text: d.text,
-          ts: d.ts,
+          id: `${ts}-${sender}-${prev.length}`,
+          sender,
+          text: String(d.text ?? ""),
+          ts,
           mine: false,
         },
       ]);
@@ -261,6 +266,10 @@ export default function TeamsCall({
 
   // ----- Waiting room: host sees who's knocking and admits/denies -----
   const [waiting, setWaiting] = useState<WaitingPerson[]>([]);
+  // Ids we've just admitted/denied. A poll already in flight returns the
+  // pre-decision snapshot and would otherwise make the person pop back into
+  // the list. Entries clear shortly after, so a later re-knock still shows.
+  const decidedRef = useRef<Set<number>>(new Set());
 
   const refreshLobby = useCallback(async () => {
     if (!isHost) return;
@@ -270,7 +279,8 @@ export default function TeamsCall({
       );
       if (res.ok) {
         const d = await res.json();
-        setWaiting(Array.isArray(d.waiting) ? d.waiting : []);
+        const list: WaitingPerson[] = Array.isArray(d.waiting) ? d.waiting : [];
+        setWaiting(list.filter((p) => !decidedRef.current.has(p.userId)));
       }
     } catch {
       /* ignore transient errors */
@@ -286,6 +296,7 @@ export default function TeamsCall({
 
   const decideLobby = useCallback(
     async (userId: number, action: "admit" | "deny") => {
+      decidedRef.current.add(userId);
       setWaiting((w) => w.filter((x) => x.userId !== userId)); // optimistic
       try {
         await fetch("/api/livekit/lobby", {
@@ -295,6 +306,9 @@ export default function TeamsCall({
         });
       } catch {
         /* next poll reconciles */
+      } finally {
+        // Release once any in-flight poll has certainly completed.
+        setTimeout(() => decidedRef.current.delete(userId), 8000);
       }
     },
     [room]
@@ -302,6 +316,7 @@ export default function TeamsCall({
 
   const admitAll = useCallback(async () => {
     const ids = waiting.map((w) => w.userId);
+    ids.forEach((id) => decidedRef.current.add(id));
     setWaiting([]);
     await Promise.all(
       ids.map((userId) =>
@@ -312,6 +327,7 @@ export default function TeamsCall({
         }).catch(() => {})
       )
     );
+    setTimeout(() => ids.forEach((id) => decidedRef.current.delete(id)), 8000);
   }, [waiting, room]);
 
   function copyInvite() {
@@ -471,22 +487,25 @@ export default function TeamsCall({
 
           <ReactionButton />
 
-          <button
-            onClick={toggleRecording}
-            disabled={recBusy}
-            title={recording ? "Stop recording" : "Record this meeting to S3"}
-            className={[
-              "flex flex-col items-center justify-center gap-0.5 rounded-xl px-3 py-2 text-[11px] font-medium transition min-w-[58px] disabled:opacity-50",
-              recording
-                ? "bg-red-600 text-white hover:bg-red-700"
-                : "bg-white/5 text-gray-200 hover:bg-white/15",
-            ].join(" ")}
-          >
-            <RecordIcon active={recording} />
-            <span className="ctrl-label">
-              {recBusy ? "…" : recording ? "Stop" : "Record"}
-            </span>
-          </button>
+          {/* Cloud recording is host-only (the API enforces it too). */}
+          {isHost && (
+            <button
+              onClick={toggleRecording}
+              disabled={recBusy}
+              title={recording ? "Stop recording" : "Record this meeting to S3"}
+              className={[
+                "flex flex-col items-center justify-center gap-0.5 rounded-xl px-2.5 sm:px-3 py-2 text-[11px] font-medium transition min-w-[44px] sm:min-w-[58px] disabled:opacity-50",
+                recording
+                  ? "bg-red-600 text-white hover:bg-red-700"
+                  : "bg-white/5 text-gray-200 hover:bg-white/15",
+              ].join(" ")}
+            >
+              <RecordIcon active={recording} />
+              <span className="ctrl-label">
+                {recBusy ? "…" : recording ? "Stop" : "Record"}
+              </span>
+            </button>
+          )}
 
           <button
             onClick={() => (localRec.recording ? localRec.stop() : localRec.start())}
@@ -547,6 +566,20 @@ function useLocalRecorder(room: string) {
   const audioCtxRef = useRef<AudioContext | null>(null);
 
   const cleanup = useCallback(() => {
+    // If a recording is still live (e.g. the user hit Leave mid-recording),
+    // stop it and bail out — onstop flushes the chunks, downloads the file and
+    // calls cleanup() again. Tearing the tracks down first would lose the file.
+    const rec = recorderRef.current;
+    if (rec && rec.state !== "inactive") {
+      try {
+        rec.stop();
+      } catch {
+        /* already torn down */
+      }
+      return;
+    }
+    recorderRef.current = null;
+    chunksRef.current = []; // don't hold a long capture in memory
     streamsRef.current.forEach((s) => s.getTracks().forEach((t) => t.stop()));
     streamsRef.current = [];
     audioCtxRef.current?.close().catch(() => {});
@@ -554,6 +587,9 @@ function useLocalRecorder(room: string) {
   }, []);
 
   const start = useCallback(async () => {
+    // Guard double-clicks: two recorders pushing into one chunk array produces
+    // a corrupt, interleaved file.
+    if (recorderRef.current) return;
     try {
       const display = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: 30 },

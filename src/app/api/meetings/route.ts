@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import crypto from "crypto";
 import { ensureSchema, getPool } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { appOrigin } from "@/lib/http";
@@ -14,11 +15,13 @@ export const dynamic = "force-dynamic";
 
 function makeRoomId(): string {
   // Teams-style readable id: abc-defg-hij
+  // Uses a CSPRNG, not Math.random: the room id is effectively the credential
+  // for joining a meeting link, so it must not be predictable.
   const chars = "abcdefghijkmnopqrstuvwxyz";
   const pick = (n: number) =>
-    Array.from({ length: n }, () =>
-      chars[Math.floor(Math.random() * chars.length)]
-    ).join("");
+    Array.from({ length: n }, () => chars[crypto.randomInt(0, chars.length)]).join(
+      ""
+    );
   return `${pick(3)}-${pick(4)}-${pick(3)}`;
 }
 
@@ -78,7 +81,13 @@ export async function POST(req: Request) {
           const ev = meetingEvent(appOrigin(req), {
             roomId,
             title,
-            scheduledAt: scheduledSql,
+            // Pass the real Date, NOT scheduledSql: that is a UTC wall-clock
+            // string with no zone, which new Date() would parse as server-local
+            // time and shift the event by the server's UTC offset.
+            scheduledAt:
+              scheduledAt && !Number.isNaN(scheduledAt.getTime())
+                ? scheduledAt
+                : null,
             durationMins,
           });
           const created = await createCalendarEvent(accessToken, ev);

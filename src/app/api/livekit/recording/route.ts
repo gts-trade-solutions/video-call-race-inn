@@ -16,12 +16,48 @@ export const dynamic = "force-dynamic";
 const EGRESS_ENDING = 2;
 const EGRESS_COMPLETE = 3;
 const EGRESS_FAILED = 4;
+const EGRESS_ABORTED = 5;
+const EGRESS_LIMIT_REACHED = 6;
+// Anything in here means egress will never progress again. Without treating
+// ABORTED/LIMIT_REACHED as terminal, a row stays 'recording' forever — the REC
+// badge sticks on and the "already recording" guard blocks the room for good.
+const EGRESS_TERMINAL = new Set([
+  EGRESS_COMPLETE,
+  EGRESS_FAILED,
+  EGRESS_ABORTED,
+  EGRESS_LIMIT_REACHED,
+]);
 
 type Row = RowDataPacket & {
   egress_id: string;
   status: string;
   started_at: string;
 };
+
+/**
+ * Resolves a meeting and the caller's relationship to it. Recording is
+ * sensitive (it writes billable egress into our S3 bucket and captures the
+ * room), so it must never be driven by a stranger who merely knows a room id.
+ */
+async function meetingAuth(room: string, userId: number) {
+  const pool = getPool();
+  const [rows] = await pool.query<RowDataPacket[]>(
+    "SELECT id, host_id FROM meetings WHERE room_id = :room LIMIT 1",
+    { room }
+  );
+  if (rows.length === 0) return null;
+  const meetingId = rows[0].id as number;
+  const isHost = (rows[0].host_id as number) === userId;
+  let isParticipant = isHost;
+  if (!isParticipant) {
+    const [p] = await pool.query<RowDataPacket[]>(
+      "SELECT 1 FROM meeting_participants WHERE meeting_id = :meetingId AND user_id = :userId LIMIT 1",
+      { meetingId, userId }
+    );
+    isParticipant = p.length > 0;
+  }
+  return { meetingId, isHost, isParticipant };
+}
 
 /**
  * GET /api/livekit/recording?room=ID
@@ -39,6 +75,11 @@ export async function GET(req: Request) {
   }
 
   await ensureSchema();
+  const auth = await meetingAuth(room, user.id);
+  if (!auth || !auth.isParticipant) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const pool = getPool();
   const [rows] = await pool.query<Row[]>(
     `SELECT egress_id, started_at FROM recordings
@@ -86,6 +127,19 @@ export async function POST(req: Request) {
   }
 
   await ensureSchema();
+
+  // Only the meeting host may start or stop a recording.
+  const auth = await meetingAuth(room, user.id);
+  if (!auth) {
+    return NextResponse.json({ error: "Meeting not found" }, { status: 404 });
+  }
+  if (!auth.isHost) {
+    return NextResponse.json(
+      { error: "Only the host can start or stop recording." },
+      { status: 403 }
+    );
+  }
+
   const pool = getPool();
   const client = egressClient(cfg.config);
 
@@ -176,10 +230,11 @@ async function recordResult(
   info: EgressInfo
 ) {
   const file = info.fileResults?.[0];
-  const done =
-    info.status === EGRESS_COMPLETE || info.status === EGRESS_FAILED;
+  const done = EGRESS_TERMINAL.has(info.status);
   const status =
-    info.status === EGRESS_FAILED
+    info.status === EGRESS_FAILED ||
+    info.status === EGRESS_ABORTED ||
+    info.status === EGRESS_LIMIT_REACHED
       ? "failed"
       : info.status === EGRESS_COMPLETE
         ? "completed"

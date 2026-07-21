@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { ensureSchema, getPool } from "@/lib/db";
 import { hashPassword, createSession } from "@/lib/auth";
+import { rateLimit, clientIp, HOUR } from "@/lib/rateLimit";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
 export const runtime = "nodejs";
@@ -40,6 +41,18 @@ export async function POST(req: Request) {
     }
 
     const normalized = String(email).trim().toLowerCase();
+
+    // Cap total guesses per account/IP across codes, not just within one code.
+    const ip = clientIp(req);
+    const byUser = rateLimit(`reset:user:${normalized}`, 10, HOUR);
+    const byIp = rateLimit(`reset:ip:${ip}`, 30, HOUR);
+    if (!byUser.ok || !byIp.ok) {
+      return NextResponse.json(
+        { error: "Too many attempts. Please try again later." },
+        { status: 429 }
+      );
+    }
+
     const pool = getPool();
 
     // Find the account, then its latest still-valid reset code.
@@ -65,10 +78,19 @@ export async function POST(req: Request) {
     if (rows.length === 0) return invalid();
     const reset = rows[0];
 
-    // Lock out after too many wrong tries; burn the code.
-    if (reset.attempts >= MAX_ATTEMPTS) {
+    // Consume one attempt ATOMICALLY before checking the code. A read-then-write
+    // counter let concurrent requests all pass the limit check at once, which
+    // made the whole 4-digit space brute-forceable in a single burst.
+    const [claim] = await pool.query<ResultSetHeader>(
+      `UPDATE password_resets
+          SET attempts = attempts + 1
+        WHERE id = :id AND used_at IS NULL AND attempts < :max`,
+      { id: reset.id, max: MAX_ATTEMPTS }
+    );
+    if (claim.affectedRows === 0) {
+      // Limit already exhausted (or code consumed) — burn it for good.
       await pool.query<ResultSetHeader>(
-        "UPDATE password_resets SET used_at = NOW() WHERE id = :id",
+        "UPDATE password_resets SET used_at = NOW() WHERE id = :id AND used_at IS NULL",
         { id: reset.id }
       );
       return NextResponse.json(
@@ -78,15 +100,13 @@ export async function POST(req: Request) {
     }
 
     if (hashPin(String(pin)) !== reset.token_hash) {
-      const attempts = reset.attempts + 1;
-      await pool.query<ResultSetHeader>(
-        `UPDATE password_resets
-            SET attempts = :attempts,
-                used_at = IF(:attempts >= :max, NOW(), used_at)
-          WHERE id = :id`,
-        { attempts, max: MAX_ATTEMPTS, id: reset.id }
-      );
-      const left = MAX_ATTEMPTS - attempts;
+      const left = Math.max(0, MAX_ATTEMPTS - (reset.attempts + 1));
+      if (left === 0) {
+        await pool.query<ResultSetHeader>(
+          "UPDATE password_resets SET used_at = NOW() WHERE id = :id",
+          { id: reset.id }
+        );
+      }
       return NextResponse.json(
         {
           error:

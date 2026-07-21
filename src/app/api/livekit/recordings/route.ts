@@ -10,6 +10,16 @@ export const dynamic = "force-dynamic";
 
 const EGRESS_COMPLETE = 3;
 const EGRESS_FAILED = 4;
+const EGRESS_ABORTED = 5;
+const EGRESS_LIMIT_REACHED = 6;
+// ABORTED/LIMIT_REACHED are terminal too — without them a stalled egress keeps
+// its row stuck in 'recording' forever.
+const EGRESS_TERMINAL = new Set([
+  EGRESS_COMPLETE,
+  EGRESS_FAILED,
+  EGRESS_ABORTED,
+  EGRESS_LIMIT_REACHED,
+]);
 
 type RecRow = RowDataPacket & {
   id: number;
@@ -52,15 +62,17 @@ export async function GET(req: Request) {
        FROM recordings r
        LEFT JOIN users u ON u.id = r.started_by
        LEFT JOIN meetings m ON m.room_id = r.room_id
-      WHERE ( :room IS NOT NULL AND r.room_id = :room )
-         OR ( :room IS NULL AND (
-                m.host_id = :userId
-                OR r.started_by = :userId
-                OR EXISTS (
-                     SELECT 1 FROM meeting_participants mp
-                      WHERE mp.meeting_id = m.id AND mp.user_id = :userId
-                   )
-            ) )
+      -- Authorization is unconditional: you must host, have started, or have
+      -- joined the meeting. ?room= only narrows that set, it never widens it.
+      WHERE (
+              m.host_id = :userId
+              OR r.started_by = :userId
+              OR EXISTS (
+                   SELECT 1 FROM meeting_participants mp
+                    WHERE mp.meeting_id = m.id AND mp.user_id = :userId
+                 )
+            )
+        AND (:room IS NULL OR r.room_id = :room)
       ORDER BY r.started_at DESC
       LIMIT 100`,
     { room: room ?? null, userId: user.id }
@@ -79,9 +91,10 @@ export async function GET(req: Request) {
           const list = await client.listEgress({ egressId: r.egress_id });
           const info = list[0];
           if (!info) return;
-          if (info.status === EGRESS_COMPLETE || info.status === EGRESS_FAILED) {
+          if (EGRESS_TERMINAL.has(info.status)) {
             const file = info.fileResults?.[0];
-            r.status = info.status === EGRESS_FAILED ? "failed" : "completed";
+            r.status =
+              info.status === EGRESS_COMPLETE ? "completed" : "failed";
             r.s3_key = file?.filename || r.s3_key;
             r.size_bytes = file?.size != null ? Number(file.size) : r.size_bytes;
             r.duration_secs =

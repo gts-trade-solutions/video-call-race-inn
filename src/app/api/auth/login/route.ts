@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureSchema, getPool } from "@/lib/db";
 import { verifyPassword, createSession } from "@/lib/auth";
+import { rateLimit, clientIp, MINUTE } from "@/lib/rateLimit";
 import type { RowDataPacket } from "mysql2";
 
 export async function POST(req: Request) {
@@ -12,6 +13,23 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: "Email and password are required." },
         { status: 400 }
+      );
+    }
+
+    // Throttle password guessing (per IP and per account).
+    const ip = clientIp(req);
+    const emailKey = String(email).trim().toLowerCase();
+    const byIp = rateLimit(`login:ip:${ip}`, 20, 15 * MINUTE);
+    const byUser = rateLimit(`login:user:${emailKey}`, 8, 15 * MINUTE);
+    if (!byIp.ok || !byUser.ok) {
+      return NextResponse.json(
+        { error: "Too many sign-in attempts. Please try again shortly." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(Math.max(byIp.retryAfter, byUser.retryAfter)),
+          },
+        }
       );
     }
 

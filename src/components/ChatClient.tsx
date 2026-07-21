@@ -255,9 +255,14 @@ export default function ChatClient({ user }: { user: SessionUser }) {
   }
 
   // All images / files shared in the open conversation (for the tabs).
+  // These must go through isUploadUrl() exactly like renderBody does — the
+  // message body is attacker-controlled, so an unchecked marker such as
+  // [[file:https://evil.com/x.exe|Invoice.pdf]] would render here as a
+  // trusted-looking download card pointing at an external site.
   const sharedImages = messages
     .filter((m) => m.body.startsWith("[[img:"))
     .map((m) => ({ id: m.id, url: m.body.slice(6, -2) }))
+    .filter((x) => isUploadUrl(x.url))
     .reverse();
   const sharedFiles = messages
     .filter((m) => m.body.startsWith("[[file:"))
@@ -270,6 +275,7 @@ export default function ChatClient({ user }: { user: SessionUser }) {
         name: sep >= 0 ? inner.slice(sep + 1) : "file",
       };
     })
+    .filter((x) => isUploadUrl(x.url))
     .reverse();
 
   // Sends a raw message body (used by text, emoji, and attachments).

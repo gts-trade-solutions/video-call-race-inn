@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { ensureSchema, getPool } from "@/lib/db";
 import { sendMail, emailConfigured } from "@/lib/email";
+import { rateLimit, clientIp, HOUR } from "@/lib/rateLimit";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
 export const runtime = "nodejs";
@@ -23,6 +24,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Email is required." }, { status: 400 });
     }
     const normalized = String(email).trim().toLowerCase();
+
+    // Critical: without this, an attacker could mint unlimited fresh codes,
+    // resetting the per-code attempt counter each time and brute-forcing the
+    // 4-digit PIN. Also stops mail-bombing and SES cost abuse.
+    const ip = clientIp(req);
+    const byUser = rateLimit(`forgot:user:${normalized}`, 3, HOUR);
+    const byIp = rateLimit(`forgot:ip:${ip}`, 10, HOUR);
+    if (!byUser.ok || !byIp.ok) {
+      // Same shape as success so we still don't leak whether the account exists.
+      return NextResponse.json({ ok: true, throttled: true });
+    }
 
     const pool = getPool();
     const [rows] = await pool.query<RowDataPacket[]>(
