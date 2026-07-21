@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { uploadDir } from "@/lib/uploads";
 import { createWriteStream } from "fs";
 import { mkdir, unlink } from "fs/promises";
 import path from "path";
@@ -70,7 +71,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No file body." }, { status: 400 });
     }
 
-    const dir = path.join(process.cwd(), "public", "uploads");
+    // Stored outside public/ on purpose — see src/lib/uploads.ts. Served by
+    // /api/files/[...path], which /uploads/* rewrites to.
+    const dir = uploadDir();
     await mkdir(dir, { recursive: true });
 
     const safe = rawName.replace(/[^a-zA-Z0-9._-]/g, "_");

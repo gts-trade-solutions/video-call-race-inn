@@ -10,6 +10,8 @@ next-env.d.ts
 .vercel
 *.tsbuildinfo
 /public/uploads
+# User uploads (served via /api/files, kept out of public/ deliberately)
+/uploads
 .claude/
 # Copied from node_modules by scripts/copy-mediapipe.mjs (~19 MB of .wasm)
 /public/mediapipe/wasm
