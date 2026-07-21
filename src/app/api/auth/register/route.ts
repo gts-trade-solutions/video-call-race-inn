@@ -3,6 +3,10 @@ import { ensureSchema, getPool, DBUser } from "@/lib/db";
 import { hashPassword, createSession } from "@/lib/auth";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
+// Client-side checks are a convenience only — anything reaching this route
+// must be validated here too, or a direct API call bypasses them entirely.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export async function POST(req: Request) {
   try {
     await ensureSchema();
@@ -11,6 +15,24 @@ export async function POST(req: Request) {
     if (!name || !email || !password) {
       return NextResponse.json(
         { error: "Name, email and password are required." },
+        { status: 400 }
+      );
+    }
+
+    const nameStr = String(name).trim();
+    const emailStr = String(email).trim().toLowerCase();
+
+    // Length caps match the column widths (name 120, email 190) so an
+    // oversized value is a clean 400 rather than a MySQL error.
+    if (nameStr.length < 1 || nameStr.length > 120) {
+      return NextResponse.json(
+        { error: "Please enter your name (up to 120 characters)." },
+        { status: 400 }
+      );
+    }
+    if (!EMAIL_RE.test(emailStr) || emailStr.length > 190) {
+      return NextResponse.json(
+        { error: "Enter a valid email address." },
         { status: 400 }
       );
     }
@@ -24,7 +46,7 @@ export async function POST(req: Request) {
     const pool = getPool();
     const [existing] = await pool.query<RowDataPacket[]>(
       "SELECT id FROM users WHERE email = :email LIMIT 1",
-      { email: String(email).toLowerCase() }
+      { email: emailStr }
     );
     if (existing.length > 0) {
       return NextResponse.json(
@@ -36,13 +58,13 @@ export async function POST(req: Request) {
     const password_hash = await hashPassword(String(password));
     const [result] = await pool.query<ResultSetHeader>(
       "INSERT INTO users (name, email, password_hash) VALUES (:name, :email, :password_hash)",
-      { name: String(name), email: String(email).toLowerCase(), password_hash }
+      { name: nameStr, email: emailStr, password_hash }
     );
 
     const user = {
       id: result.insertId,
-      name: String(name),
-      email: String(email).toLowerCase(),
+      name: nameStr,
+      email: emailStr,
     };
     await createSession(user);
 

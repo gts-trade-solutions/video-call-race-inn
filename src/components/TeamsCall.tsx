@@ -519,7 +519,7 @@ export default function TeamsCall({
           >
             <SaveRecIcon active={localRec.recording} />
             <span className="ctrl-label">
-              {localRec.recording ? "Stop" : "Local"}
+              {localRec.recording ? "Stop" : "Download"}
             </span>
           </button>
 
