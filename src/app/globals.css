@@ -91,6 +91,21 @@ body {
   transform-origin: bottom center;
 }
 
+/* Incoming-call popup: slide in and pulse gently while ringing. */
+@keyframes call-pop-in {
+  0% {
+    transform: translate(-50%, -16px);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+.call-ring-pop {
+  animation: call-pop-in 0.25s ease-out;
+}
+
 /* Touch screens have no hover, so the tile's spotlight star (hidden until
    hover on desktop) must always be visible there. */
 @media (hover: none) {

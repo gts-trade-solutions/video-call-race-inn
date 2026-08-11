@@ -432,7 +432,10 @@ export default function ChatClient({ user }: { user: SessionUser }) {
     e.target.value = ""; // allow re-picking the same file
   }
 
-  // Teams behaviour: call icons start a meeting and drop the link in chat.
+  // Teams behaviour: the call icons *ring* the other person — they get an
+  // incoming-call popup with Accept/Decline while we wait in the room. No
+  // link lands in the chat; a declined/unanswered ring leaves a "missed call"
+  // record instead.
   async function startCallWith(mode: "video" | "audio" = "video") {
     if (!active || starting) return;
     setStarting(true);
@@ -448,19 +451,17 @@ export default function ChatClient({ user }: { user: SessionUser }) {
       });
       const data = await res.json();
       if (res.ok) {
-        const suffix = mode === "audio" ? "?mode=audio" : "";
-        const link = `${window.location.origin}/meeting/${data.roomId}${suffix}`;
-        await fetch("/api/chat/messages", {
+        await fetch("/api/calls", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            to: active.id,
-            body:
-              mode === "audio"
-                ? `📞 Join my audio call: ${link}`
-                : `📹 Join my video meeting: ${link}`,
+            action: "ring",
+            roomId: data.roomId,
+            mode,
+            toUserIds: [active.id],
           }),
-        });
+        }).catch(() => {});
+        const suffix = mode === "audio" ? "?mode=audio" : "";
         router.push(`/meeting/${data.roomId}${suffix}`);
       }
     } finally {
@@ -1801,13 +1802,20 @@ function GroupThread({
       });
       const data = await res.json();
       if (res.ok) {
+        // Ring every member; the chat line stays as the way for anyone who
+        // missed the ring to hop in later.
+        await fetch("/api/calls", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "ring", roomId: data.roomId, groupId }),
+        }).catch(() => {});
         const link = `${window.location.origin}/meeting/${data.roomId}`;
         await fetch("/api/groups/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             groupId,
-            body: `📹 Join group meeting: ${link}`,
+            body: `📹 Group call started — join: ${link}`,
           }),
         });
         router.push(`/meeting/${data.roomId}`);

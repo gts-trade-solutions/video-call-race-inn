@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import type { SessionUser } from "@/lib/auth";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
+import IncomingCall from "@/components/IncomingCall";
 
 export default function AppShell({
   user,
@@ -141,6 +142,8 @@ export default function AppShell({
 
   return (
     <div className="h-screen flex bg-teams-bg overflow-hidden">
+      {/* Incoming calls ring on every page inside the shell. */}
+      <IncomingCall />
       {/* Left rail */}
       <nav className="w-[68px] shrink-0 bg-teams-purpleDarker flex flex-col items-center py-3 gap-1">
         {navItems.map((item) => {
