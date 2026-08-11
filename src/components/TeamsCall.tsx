@@ -257,12 +257,16 @@ export default function TeamsCall({
 
   // ----- Screen share with real feedback -----
   const [shareBusy, setShareBusy] = useState(false);
-  const [canShareScreen, setCanShareScreen] = useState(true);
-  useEffect(() => {
-    setCanShareScreen(!!navigator.mediaDevices?.getDisplayMedia);
-  }, []);
   const toggleShare = useCallback(async () => {
     if (!localParticipant || shareBusy) return;
+    // Recent Android Chrome can share; iOS Safari can't. Keep the button and
+    // explain, rather than silently hiding a feature people look for.
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      notify(
+        "This browser can't share the screen. On a phone, use a recent Chrome; on iPhone it isn't supported."
+      );
+      return;
+    }
     setShareBusy(true);
     try {
       await localParticipant.setScreenShareEnabled(!isScreenShareEnabled, {
@@ -594,23 +598,18 @@ export default function TeamsCall({
               <span className="ctrl-label">Effects</span>
             </button>
 
-            {/* Screen capture doesn't exist in phone browsers — hide the
-                button there instead of letting it silently do nothing, and
-                say what went wrong when it fails on desktop. */}
-            {canShareScreen && (
-              <button
-                onClick={toggleShare}
-                disabled={shareBusy}
-                aria-label="Share screen"
-                title="Share screen"
-                className={ctrlBtn(isScreenShareEnabled) + " disabled:opacity-50"}
-              >
-                <ShareIcon />
-                <span className="ctrl-label">
-                  {shareBusy ? "…" : isScreenShareEnabled ? "Stop" : "Share"}
-                </span>
-              </button>
-            )}
+            <button
+              onClick={toggleShare}
+              disabled={shareBusy}
+              aria-label="Share screen"
+              title="Share screen"
+              className={ctrlBtn(isScreenShareEnabled) + " disabled:opacity-50"}
+            >
+              <ShareIcon />
+              <span className="ctrl-label">
+                {shareBusy ? "…" : isScreenShareEnabled ? "Stop" : "Share"}
+              </span>
+            </button>
 
             <ReactionButton />
 

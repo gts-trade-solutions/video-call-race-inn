@@ -807,20 +807,21 @@ export default function ChatClient({ user }: { user: SessionUser }) {
                   setProfileTab("overview");
                   setProfileOpen(true);
                 }}
-                className="flex items-center gap-3 hover:bg-teams-bg rounded-lg px-1.5 py-1 -ml-1.5 transition"
+                className="flex items-center gap-2 sm:gap-3 hover:bg-teams-bg rounded-lg px-1.5 py-1 sm:-ml-1.5 transition min-w-0"
                 title="View profile"
               >
                 <Avatar
                   name={active.name}
-                  size={40}
+                  size={36}
                   online={isOnline(active.lastSeen)}
                   src={active.avatarUrl}
                 />
-                <div className="font-semibold text-lg text-teams-dark">
+                <div className="font-semibold text-base sm:text-lg text-teams-dark truncate">
                   {active.name}
                 </div>
               </button>
-              <nav className="flex items-center gap-4 ml-3 text-sm">
+              {/* Tabs fit on desktop; on phones they live under the header. */}
+              <nav className="hidden sm:flex items-center gap-4 ml-3 text-sm">
                 {(["chat", "files", "photos"] as const).map((t) => (
                   <button
                     key={t}
@@ -835,7 +836,7 @@ export default function ChatClient({ user }: { user: SessionUser }) {
                   </button>
                 ))}
               </nav>
-              <div className="ml-auto flex items-center gap-0.5 text-teams-gray">
+              <div className="ml-auto flex items-center gap-0.5 text-teams-gray shrink-0">
                 <IconBtn
                   title="Video call"
                   onClick={() => startCallWith("video")}
@@ -850,18 +851,20 @@ export default function ChatClient({ user }: { user: SessionUser }) {
                 >
                   <PhoneIcon />
                 </IconBtn>
-                <IconBtn title="New chat" onClick={() => setAddOpen(true)}>
-                  <AddPeopleIcon />
-                </IconBtn>
-                <IconBtn
-                  title="Search in chat"
-                  onClick={() => {
-                    setSearchOpen((o) => !o);
-                    setMsgQuery("");
-                  }}
-                >
-                  <SearchIcon />
-                </IconBtn>
+                <span className="hidden sm:contents">
+                  <IconBtn title="New chat" onClick={() => setAddOpen(true)}>
+                    <AddPeopleIcon />
+                  </IconBtn>
+                  <IconBtn
+                    title="Search in chat"
+                    onClick={() => {
+                      setSearchOpen((o) => !o);
+                      setMsgQuery("");
+                    }}
+                  >
+                    <SearchIcon />
+                  </IconBtn>
+                </span>
                 <div className="relative" ref={moreRef}>
                   <IconBtn
                     title="More options"
@@ -914,6 +917,34 @@ export default function ChatClient({ user }: { user: SessionUser }) {
               </div>
             </header>
 
+            {/* Phone tab strip (Chat / Files / Photos) — the desktop tabs sit
+                inside the header, which has no room on a small screen. */}
+            <nav className="sm:hidden flex items-center gap-6 px-4 border-b border-teams-line text-sm shrink-0">
+              {(["chat", "files", "photos"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`py-2 capitalize ${
+                    tab === t
+                      ? "text-teams-dark font-medium border-b-2 border-teams-purple"
+                      : "text-teams-gray"
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+              <button
+                onClick={() => {
+                  setSearchOpen((o) => !o);
+                  setMsgQuery("");
+                }}
+                aria-label="Search in chat"
+                className="ml-auto py-2 text-teams-gray"
+              >
+                <SearchIcon />
+              </button>
+            </nav>
+
             {tab === "chat" ? (
               <>
             {/* in-chat search */}
@@ -949,7 +980,7 @@ export default function ChatClient({ user }: { user: SessionUser }) {
               </div>
             )}
             {/* messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-4">
+            <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4">
               {messages.length === 0 && (
                 <p className="text-center text-sm text-teams-gray mt-8">
                   This is the beginning of your chat with {active.name}.
@@ -1880,7 +1911,7 @@ function GroupThread({
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-6 py-4">
+      <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4">
         {msgs.length === 0 && (
           <p className="text-center text-sm text-teams-gray mt-8">
             This is the start of the group chat.

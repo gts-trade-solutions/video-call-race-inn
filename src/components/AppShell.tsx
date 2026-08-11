@@ -141,7 +141,9 @@ export default function AppShell({
   ];
 
   return (
-    <div className="h-screen flex bg-teams-bg overflow-hidden">
+    // h-dvh, not h-screen: 100vh on phones includes the space behind the
+    // browser's URL bar, which pushed the composer/tab bar off-screen.
+    <div className="h-dvh flex bg-teams-bg overflow-hidden">
       {/* Incoming calls ring on every page inside the shell. */}
       <IncomingCall />
       {/* Left rail (desktop). Phones get the bottom tab bar instead. */}
