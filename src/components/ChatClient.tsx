@@ -586,10 +586,18 @@ export default function ChatClient({ user }: { user: SessionUser }) {
       </div>
     ) : null;
 
+  // Phones show one pane at a time: the list, or the open conversation with a
+  // back button. Desktop keeps the classic two-pane layout.
+  const hasActive = activeGroupId != null || active != null;
+
   return (
     <div className="h-full flex bg-white">
       {/* ---------------- Chat list column ---------------- */}
-      <aside className="w-[340px] shrink-0 border-r border-teams-line flex flex-col bg-white">
+      <aside
+        className={`${
+          hasActive ? "hidden sm:flex" : "flex"
+        } w-full sm:w-[340px] shrink-0 sm:border-r border-teams-line flex-col bg-white`}
+      >
         <div className="px-4 pt-4 pb-2 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-teams-dark">Chat</h1>
           <div className="flex items-center gap-0.5 text-teams-gray">
@@ -769,7 +777,11 @@ export default function ChatClient({ user }: { user: SessionUser }) {
       </aside>
 
       {/* ---------------- Conversation pane ---------------- */}
-      <section className="flex-1 min-w-0 flex flex-col bg-white">
+      <section
+        className={`${
+          hasActive ? "flex" : "hidden sm:flex"
+        } flex-1 min-w-0 flex-col bg-white`}
+      >
         {activeGroupId != null ? (
           <GroupThread
             groupId={activeGroupId}
@@ -778,10 +790,18 @@ export default function ChatClient({ user }: { user: SessionUser }) {
             meAvatar={user.avatarUrl ?? null}
             group={groups.find((g) => g.id === activeGroupId) || null}
             onReload={loadGroups}
+            onBack={() => setActiveGroupId(null)}
           />
         ) : active ? (
           <>
-            <header className="h-16 shrink-0 border-b border-teams-line flex items-center px-4 gap-3">
+            <header className="h-16 shrink-0 border-b border-teams-line flex items-center px-2 sm:px-4 gap-1 sm:gap-3">
+              <button
+                onClick={() => setActiveId(null)}
+                aria-label="Back to chats"
+                className="sm:hidden w-9 h-9 flex items-center justify-center rounded-lg text-teams-gray hover:bg-teams-bg shrink-0"
+              >
+                <BackIcon />
+              </button>
               <button
                 onClick={() => {
                   setProfileTab("overview");
@@ -1695,6 +1715,7 @@ function GroupThread({
   meName,
   group,
   onReload,
+  onBack,
 }: {
   groupId: number;
   meId: number;
@@ -1702,6 +1723,8 @@ function GroupThread({
   meAvatar: string | null;
   group: Group | null;
   onReload: () => void;
+  /** Phones: return to the chat list (the list is hidden while a thread is open). */
+  onBack: () => void;
 }) {
   const router = useRouter();
   const [msgs, setMsgs] = useState<GroupMsg[]>([]);
@@ -1827,7 +1850,14 @@ function GroupThread({
 
   return (
     <>
-      <header className="h-16 shrink-0 border-b border-teams-line flex items-center px-4 gap-3">
+      <header className="h-16 shrink-0 border-b border-teams-line flex items-center px-2 sm:px-4 gap-1 sm:gap-3">
+        <button
+          onClick={onBack}
+          aria-label="Back to chats"
+          className="sm:hidden w-9 h-9 flex items-center justify-center rounded-lg text-teams-gray hover:bg-teams-bg shrink-0"
+        >
+          <BackIcon />
+        </button>
         <div className="w-10 h-10 rounded-full bg-teams-purple/15 text-teams-purple flex items-center justify-center shrink-0">
           <GroupIcon />
         </div>
@@ -2513,6 +2543,11 @@ const SearchIcon = () => (
   <svg {...S()}>
     <circle cx="11" cy="11" r="7" />
     <path d="M21 21l-4.3-4.3" />
+  </svg>
+);
+const BackIcon = () => (
+  <svg {...S()}>
+    <path d="M15 18l-6-6 6-6" />
   </svg>
 );
 const VideoIcon = () => (

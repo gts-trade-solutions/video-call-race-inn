@@ -72,25 +72,33 @@ export default function IncomingCall() {
     let timer: ReturnType<typeof setInterval> | undefined;
     try {
       ctx = new AudioContext();
-      const burst = () => {
+      // A soft marimba-like arpeggio (C-E-G-C), gentler than a phone burr.
+      // Each note is a sine with a fast attack and a long exponential decay,
+      // plus a quiet octave overtone for warmth.
+      const NOTES = [523.25, 659.25, 783.99, 1046.5];
+      const phrase = () => {
         if (!ctx || ctx.state !== "running") return;
-        for (const startOffset of [0, 0.5]) {
-          for (const freq of [440, 480]) {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.frequency.value = freq;
-            const t0 = ctx.currentTime + startOffset;
+        NOTES.forEach((freq, i) => {
+          const t0 = ctx!.currentTime + i * 0.17;
+          for (const [mult, vol] of [
+            [1, 0.07],
+            [2, 0.018],
+          ] as const) {
+            const osc = ctx!.createOscillator();
+            const gain = ctx!.createGain();
+            osc.type = "sine";
+            osc.frequency.value = freq * mult;
             gain.gain.setValueAtTime(0.0001, t0);
-            gain.gain.exponentialRampToValueAtTime(0.08, t0 + 0.03);
-            gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.38);
-            osc.connect(gain).connect(ctx.destination);
+            gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.7);
+            osc.connect(gain).connect(ctx!.destination);
             osc.start(t0);
-            osc.stop(t0 + 0.42);
+            osc.stop(t0 + 0.75);
           }
-        }
+        });
       };
-      ctx.resume().then(burst).catch(() => {});
-      timer = setInterval(burst, 2600);
+      ctx.resume().then(phrase).catch(() => {});
+      timer = setInterval(phrase, 3200);
     } catch {
       /* silent ring — the popup still shows */
     }

@@ -49,6 +49,7 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
   const [createdLink, setCreatedLink] = useState<string | null>(null);
 
   const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [schedView, setSchedView] = useState<"list" | "calendar">("list");
   const [google, setGoogle] = useState<GoogleStatus>({
     configured: false,
     connected: false,
@@ -178,7 +179,7 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
 
   return (
     <div className="h-full overflow-y-auto bg-white">
-      <div className="max-w-5xl w-full mx-auto px-8 py-8">
+      <div className="max-w-5xl w-full mx-auto px-4 py-5 sm:px-8 sm:py-8">
         <h1 className="text-2xl font-bold text-teams-dark mb-6">Meet</h1>
 
         {error && (
@@ -287,9 +288,26 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
 
         {/* Scheduled meetings */}
         <div className="flex items-center justify-between mt-10 mb-3 gap-3 flex-wrap">
-          <h2 className="text-lg font-bold text-teams-dark">
-            Scheduled meetings
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-bold text-teams-dark">
+              Scheduled meetings
+            </h2>
+            <div className="flex rounded-lg border border-teams-line overflow-hidden text-sm">
+              {(["list", "calendar"] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setSchedView(v)}
+                  className={`px-3 py-1 capitalize transition ${
+                    schedView === v
+                      ? "bg-teams-purple text-white"
+                      : "bg-white text-teams-gray hover:bg-teams-bg"
+                  }`}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
           {google.configured &&
             (google.connected ? (
               <div className="flex items-center gap-2 text-sm">
@@ -314,7 +332,9 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
               </button>
             ))}
         </div>
-        {scheduled.length === 0 ? (
+        {schedView === "calendar" ? (
+          <MonthCalendar meetings={scheduled} onJoin={go} />
+        ) : scheduled.length === 0 ? (
           <div className="border border-teams-line rounded-lg p-6 text-sm text-teams-gray">
             No scheduled meetings yet. Use{" "}
             <span className="font-medium text-teams-dark">
@@ -683,6 +703,131 @@ function ScheduleModal({
         </button>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * The "normal" calendar: an in-app month grid of scheduled meetings, no
+ * Google account needed. Click a meeting chip to jump into it.
+ */
+function MonthCalendar({
+  meetings,
+  onJoin,
+}: {
+  meetings: Meeting[];
+  onJoin: (roomId: string) => void;
+}) {
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth()); // 0-based
+
+  // Meetings bucketed by local calendar day.
+  const byDay = new Map<string, Meeting[]>();
+  for (const m of meetings) {
+    const d = new Date(m.scheduledAt!);
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    byDay.set(key, [...(byDay.get(key) || []), m]);
+  }
+
+  const first = new Date(year, month, 1);
+  const startOffset = first.getDay(); // Sunday-first, like phone calendars
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (number | null)[] = [
+    ...Array.from({ length: startOffset }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const monthLabel = first.toLocaleDateString([], {
+    month: "long",
+    year: "numeric",
+  });
+  const isToday = (day: number) =>
+    year === now.getFullYear() && month === now.getMonth() && day === now.getDate();
+
+  function shift(delta: number) {
+    const d = new Date(year, month + delta, 1);
+    setYear(d.getFullYear());
+    setMonth(d.getMonth());
+  }
+
+  return (
+    <div className="border border-teams-line rounded-lg overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-teams-line bg-teams-bg">
+        <button
+          onClick={() => shift(-1)}
+          aria-label="Previous month"
+          className="w-8 h-8 rounded-md hover:bg-white text-teams-gray"
+        >
+          ‹
+        </button>
+        <span className="font-semibold text-teams-dark">{monthLabel}</span>
+        <button
+          onClick={() => shift(1)}
+          aria-label="Next month"
+          className="w-8 h-8 rounded-md hover:bg-white text-teams-gray"
+        >
+          ›
+        </button>
+      </div>
+      <div className="grid grid-cols-7 text-center text-[11px] font-semibold uppercase tracking-wide text-teams-gray border-b border-teams-line">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+          <div key={d} className="py-1.5">
+            {d}
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7">
+        {cells.map((day, i) => {
+          const dayMeetings = day
+            ? byDay.get(`${year}-${month}-${day}`) || []
+            : [];
+          return (
+            <div
+              key={i}
+              className={`min-h-[72px] sm:min-h-[88px] p-1 border-b border-r border-teams-line/60 [&:nth-child(7n)]:border-r-0 ${
+                day === null ? "bg-teams-bg/40" : ""
+              }`}
+            >
+              {day !== null && (
+                <>
+                  <span
+                    className={`inline-flex items-center justify-center w-6 h-6 text-xs rounded-full mb-0.5 ${
+                      isToday(day)
+                        ? "bg-teams-purple text-white font-bold"
+                        : "text-teams-dark"
+                    }`}
+                  >
+                    {day}
+                  </span>
+                  <div className="space-y-0.5">
+                    {dayMeetings.slice(0, 2).map((m) => (
+                      <button
+                        key={m.roomId}
+                        onClick={() => onJoin(m.roomId)}
+                        title={`${m.title} — ${formatWhen(m.scheduledAt!)}`}
+                        className="block w-full text-left text-[10px] sm:text-[11px] leading-tight bg-teams-purple/10 text-teams-purple hover:bg-teams-purple hover:text-white rounded px-1 py-0.5 truncate transition"
+                      >
+                        {new Date(m.scheduledAt!).toLocaleTimeString([], {
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}{" "}
+                        {m.title}
+                      </button>
+                    ))}
+                    {dayMeetings.length > 2 && (
+                      <span className="block text-[10px] text-teams-gray px-1">
+                        +{dayMeetings.length - 2} more
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

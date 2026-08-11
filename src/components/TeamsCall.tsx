@@ -255,6 +255,31 @@ export default function TeamsCall({
   // ----- Video effects: none / blur / virtual background (Teams-style) -----
   const effects = useVideoEffects();
 
+  // ----- Screen share with real feedback -----
+  const [shareBusy, setShareBusy] = useState(false);
+  const [canShareScreen, setCanShareScreen] = useState(true);
+  useEffect(() => {
+    setCanShareScreen(!!navigator.mediaDevices?.getDisplayMedia);
+  }, []);
+  const toggleShare = useCallback(async () => {
+    if (!localParticipant || shareBusy) return;
+    setShareBusy(true);
+    try {
+      await localParticipant.setScreenShareEnabled(!isScreenShareEnabled, {
+        audio: true,
+        selfBrowserSurface: "include",
+      });
+    } catch (e) {
+      // Cancelling the picker throws NotAllowedError — that's not a failure.
+      if ((e as DOMException)?.name !== "NotAllowedError") {
+        console.error("screen share error:", e);
+        notify("Couldn't share the screen in this browser.");
+      }
+    } finally {
+      setShareBusy(false);
+    }
+  }, [localParticipant, isScreenShareEnabled, shareBusy, notify]);
+
   // ----- Spotlight: everyone sees one person big -----
   const [spotlight, setSpotlight] = useState<string | null>(null);
   const { send: sendSpotlight } = useDataChannel("spotlight", (msg) => {
@@ -569,17 +594,23 @@ export default function TeamsCall({
               <span className="ctrl-label">Effects</span>
             </button>
 
-            <TrackToggle
-              source={Track.Source.ScreenShare}
-              showIcon={false}
-              aria-label="Share screen"
-              title="Share screen"
-              captureOptions={{ audio: true, selfBrowserSurface: "include" }}
-              className={ctrlBtn(isScreenShareEnabled)}
-            >
-              <ShareIcon />
-              <span className="ctrl-label">Share</span>
-            </TrackToggle>
+            {/* Screen capture doesn't exist in phone browsers — hide the
+                button there instead of letting it silently do nothing, and
+                say what went wrong when it fails on desktop. */}
+            {canShareScreen && (
+              <button
+                onClick={toggleShare}
+                disabled={shareBusy}
+                aria-label="Share screen"
+                title="Share screen"
+                className={ctrlBtn(isScreenShareEnabled) + " disabled:opacity-50"}
+              >
+                <ShareIcon />
+                <span className="ctrl-label">
+                  {shareBusy ? "…" : isScreenShareEnabled ? "Stop" : "Share"}
+                </span>
+              </button>
+            )}
 
             <ReactionButton />
 
@@ -1817,25 +1848,21 @@ const SpotlightIcon = ({ active }: { active?: boolean }) => (
     <path d="M12 2l2.9 6.26L21 9.27l-4.5 4.38L17.8 21 12 17.27 6.2 21l1.3-7.35L3 9.27l6.1-1.01L12 2Z" />
   </svg>
 );
+// The real ✋ reads instantly (and matches Teams) where a line-art hand didn't.
 const HandIcon = ({
-  raised,
   small,
 }: {
   raised?: boolean;
   small?: boolean;
-}) => {
-  const size = small ? 13 : 20;
-  return (
-    <svg {...I({ width: size, height: size })}>
-      <path
-        d="M9 11V4.5a1.5 1.5 0 0 1 3 0V11m0-.5V3.5a1.5 1.5 0 0 1 3 0V11m0-.5V5.5a1.5 1.5 0 0 1 3 0V13"
-        fill={raised ? "currentColor" : "none"}
-        fillOpacity={raised ? 0.18 : 0}
-      />
-      <path d="M9 11V8.5a1.5 1.5 0 0 0-3 0V15a6 6 0 0 0 6 6h1.5a5.5 5.5 0 0 0 5.5-5.5V13" />
-    </svg>
-  );
-};
+}) => (
+  <span
+    aria-hidden
+    style={{ fontSize: small ? 12 : 19, lineHeight: 1 }}
+    className="select-none"
+  >
+    ✋
+  </span>
+);
 const CursorIcon = () => (
   <svg {...I({ width: 18, height: 18 })}>
     <path d="M5 2l14 8.5-6.2 1.2L9.6 19 5 2Z" />

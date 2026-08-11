@@ -144,8 +144,8 @@ export default function AppShell({
     <div className="h-screen flex bg-teams-bg overflow-hidden">
       {/* Incoming calls ring on every page inside the shell. */}
       <IncomingCall />
-      {/* Left rail */}
-      <nav className="w-[68px] shrink-0 bg-teams-purpleDarker flex flex-col items-center py-3 gap-1">
+      {/* Left rail (desktop). Phones get the bottom tab bar instead. */}
+      <nav className="w-[68px] shrink-0 bg-teams-purpleDarker hidden sm:flex flex-col items-center py-3 gap-1">
         {navItems.map((item) => {
           const active =
             pathname === item.href || pathname.startsWith(item.href + "/");
@@ -180,16 +180,16 @@ export default function AppShell({
 
       {/* Right side: header + content */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <header className="h-14 shrink-0 bg-teams-purple text-white flex items-center px-4 justify-between shadow z-10">
-          <div className="bg-white rounded-md px-3 py-1.5 flex items-center">
+        <header className="h-12 sm:h-14 shrink-0 bg-teams-purple text-white flex items-center px-3 sm:px-4 justify-between shadow z-10">
+          <div className="bg-white rounded-md px-2 py-1 sm:px-3 sm:py-1.5 flex items-center min-w-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/logo.svg"
               alt="Race Innovations"
-              className="h-9 w-auto object-contain"
+              className="h-6 sm:h-9 w-auto object-contain"
             />
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <ThemeSwitcher />
             <span className="text-sm hidden sm:block opacity-90">
               {user.name}
@@ -233,6 +233,14 @@ export default function AppShell({
                       Remove photo
                     </button>
                   )}
+                  {/* On phones the standalone Sign out button is hidden, so
+                      the avatar menu carries it instead. */}
+                  <button
+                    onClick={logout}
+                    className="w-full text-left px-4 py-2 hover:bg-teams-bg sm:hidden border-t border-teams-line"
+                  >
+                    Sign out
+                  </button>
                 </div>
               )}
             </div>
@@ -245,15 +253,43 @@ export default function AppShell({
             />
             <button
               onClick={logout}
-              className="text-sm bg-white/15 hover:bg-white/25 rounded px-3 py-1.5 transition"
+              className="hidden sm:block text-sm bg-white/15 hover:bg-white/25 rounded px-3 py-1.5 transition"
             >
               Sign out
             </button>
           </div>
         </header>
 
-        <div className="flex-1 min-h-0">{children}</div>
+        {/* Leave room for the bottom tab bar on phones. */}
+        <div className="flex-1 min-h-0 pb-14 sm:pb-0">{children}</div>
       </div>
+
+      {/* Bottom tab bar (phones) — the Teams mobile pattern. */}
+      <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-teams-purpleDarker border-t border-white/10 flex pb-[env(safe-area-inset-bottom)]">
+        {navItems.map((item) => {
+          const active =
+            pathname === item.href || pathname.startsWith(item.href + "/");
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition ${
+                active ? "text-white" : "text-white/60"
+              }`}
+            >
+              <span className="relative">
+                {item.icon}
+                {item.href === "/chat" && unread > 0 && (
+                  <span className="absolute -top-1 -right-2.5 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[17px] h-[17px] px-1 flex items-center justify-center">
+                    {unread > 9 ? "9+" : unread}
+                  </span>
+                )}
+              </span>
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
 
       {/* New-message toast */}
       {toast && (
@@ -262,7 +298,7 @@ export default function AppShell({
             setToast(null);
             router.push("/chat");
           }}
-          className="fixed bottom-5 right-5 z-50 bg-white border border-teams-line shadow-2xl rounded-xl px-4 py-3 flex items-center gap-3 text-left hover:shadow-xl transition animate-[fadeIn_0.2s_ease-out]"
+          className="fixed bottom-20 sm:bottom-5 right-3 sm:right-5 z-50 bg-white border border-teams-line shadow-2xl rounded-xl px-4 py-3 flex items-center gap-3 text-left hover:shadow-xl transition animate-[fadeIn_0.2s_ease-out]"
         >
           <span className="w-9 h-9 rounded-full bg-teams-purple text-white flex items-center justify-center shrink-0">
             <ChatIcon />
