@@ -138,6 +138,7 @@ export default function AppShell({
   const navItems = [
     { href: "/chat", label: "Chat", icon: <ChatIcon /> },
     { href: "/dashboard", label: "Meetings", icon: <MeetingsIcon /> },
+    { href: "/calendar", label: "Calendar", icon: <CalendarNavIcon /> },
   ];
 
   return (
@@ -326,6 +327,28 @@ function ChatIcon() {
         strokeWidth="1.8"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CalendarNavIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <rect
+        x="3"
+        y="4"
+        width="18"
+        height="17"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M3 9h18M8 2v4M16 2v4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
       />
     </svg>
   );

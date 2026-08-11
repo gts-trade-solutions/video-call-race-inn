@@ -3,11 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SessionUser } from "@/lib/auth";
-import {
-  googleCalendarUrl,
-  outlookCalendarUrl,
-  meetingEvent,
-} from "@/lib/calendar";
+import { Modal, ScheduleModal } from "@/components/meet/ScheduleModal";
 
 type Meeting = {
   roomId: string;
@@ -17,12 +13,6 @@ type Meeting = {
   durationMins: number | null;
   googleHtmlLink: string | null;
   isHost: number;
-};
-
-type GoogleStatus = {
-  configured: boolean;
-  connected: boolean;
-  email?: string | null;
 };
 
 type Recording = {
@@ -49,11 +39,6 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
   const [createdLink, setCreatedLink] = useState<string | null>(null);
 
   const [recordings, setRecordings] = useState<Recording[]>([]);
-  const [schedView, setSchedView] = useState<"list" | "calendar">("list");
-  const [google, setGoogle] = useState<GoogleStatus>({
-    configured: false,
-    connected: false,
-  });
   const [calMsg, setCalMsg] = useState<string | null>(null);
 
   function loadMeetings() {
@@ -68,44 +53,8 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
       .then((d) => setRecordings(d.recordings || []))
       .catch(() => {});
   }
-  function loadGoogleStatus() {
-    fetch("/api/calendar/google/status")
-      .then((r) => (r.ok ? r.json() : { configured: false, connected: false }))
-      .then((d) => setGoogle(d))
-      .catch(() => {});
-  }
   useEffect(loadMeetings, []);
   useEffect(loadRecordings, []);
-  useEffect(loadGoogleStatus, []);
-
-  // Surface the result of the Google OAuth round-trip (?calendar=...).
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const c = params.get("calendar");
-    if (!c) return;
-    const messages: Record<string, string> = {
-      connected: "Google Calendar connected ✓",
-      denied: "Google Calendar connection was cancelled.",
-      error: "Couldn't connect Google Calendar. Please try again.",
-      unconfigured: "Google Calendar isn't set up on the server yet.",
-    };
-    setCalMsg(messages[c] || null);
-    loadGoogleStatus();
-    // Clean the query param out of the URL.
-    window.history.replaceState({}, "", "/dashboard");
-    const t = setTimeout(() => setCalMsg(null), 5000);
-    return () => clearTimeout(t);
-  }, []);
-
-  function connectGoogle() {
-    window.location.href = "/api/calendar/google/connect";
-  }
-  async function disconnectGoogle() {
-    await fetch("/api/calendar/google/disconnect", { method: "POST" }).catch(
-      () => {}
-    );
-    loadGoogleStatus();
-  }
 
   const links = meetings.filter((m) => !m.scheduledAt);
   const scheduled = meetings
@@ -288,53 +237,17 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
 
         {/* Scheduled meetings */}
         <div className="flex items-center justify-between mt-10 mb-3 gap-3 flex-wrap">
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-bold text-teams-dark">
-              Scheduled meetings
-            </h2>
-            <div className="flex rounded-lg border border-teams-line overflow-hidden text-sm">
-              {(["list", "calendar"] as const).map((v) => (
-                <button
-                  key={v}
-                  onClick={() => setSchedView(v)}
-                  className={`px-3 py-1 capitalize transition ${
-                    schedView === v
-                      ? "bg-teams-purple text-white"
-                      : "bg-white text-teams-gray hover:bg-teams-bg"
-                  }`}
-                >
-                  {v}
-                </button>
-              ))}
-            </div>
-          </div>
-          {google.configured &&
-            (google.connected ? (
-              <div className="flex items-center gap-2 text-sm">
-                <span className="inline-flex items-center gap-1.5 text-green-700 bg-green-50 border border-green-200 rounded-full px-2.5 py-1">
-                  <GoogleIcon />
-                  {google.email || "Google Calendar"} ✓
-                </span>
-                <button
-                  onClick={disconnectGoogle}
-                  className="text-teams-gray hover:text-red-600 hover:underline"
-                >
-                  Disconnect
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={connectGoogle}
-                className="inline-flex items-center gap-2 text-sm border border-teams-line hover:bg-teams-bg rounded-md px-3 py-1.5 font-medium"
-              >
-                <GoogleIcon />
-                Connect Google Calendar
-              </button>
-            ))}
+          <h2 className="text-lg font-bold text-teams-dark">
+            Scheduled meetings
+          </h2>
+          <button
+            onClick={() => router.push("/calendar")}
+            className="inline-flex items-center gap-1.5 text-sm text-teams-purple font-medium hover:underline"
+          >
+            <CalIcon /> Open calendar
+          </button>
         </div>
-        {schedView === "calendar" ? (
-          <MonthCalendar meetings={scheduled} onJoin={go} />
-        ) : scheduled.length === 0 ? (
+        {scheduled.length === 0 ? (
           <div className="border border-teams-line rounded-lg p-6 text-sm text-teams-gray">
             No scheduled meetings yet. Use{" "}
             <span className="font-medium text-teams-dark">
@@ -362,18 +275,16 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <AddToCalendarMenu meeting={m} />
-                  {m.googleHtmlLink && (
-                    <a
-                      href={m.googleHtmlLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="View in Google Calendar"
-                      className="text-sm border border-teams-line hover:bg-white rounded-md px-2.5 py-1.5 inline-flex items-center"
-                    >
-                      <GoogleIcon />
-                    </a>
-                  )}
+                  <a
+                    href={`/api/meetings/ics?roomId=${encodeURIComponent(
+                      m.roomId
+                    )}`}
+                    title="Download calendar invite (.ics)"
+                    className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5 inline-flex items-center gap-1.5"
+                  >
+                    <CalIcon />
+                    <span className="hidden sm:inline">Invite (.ics)</span>
+                  </a>
                   <button
                     onClick={() => copy(m.roomId)}
                     className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5"
@@ -552,7 +463,6 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
       {showSchedule && (
         <ScheduleModal
           defaultName={user.name}
-          googleConnected={google.configured && google.connected}
           onClose={() => setShowSchedule(false)}
           onScheduled={(summary) => {
             setShowSchedule(false);
@@ -568,430 +478,9 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
   );
 }
 
-type Contact = { id: number; name: string; email: string };
 
-function ScheduleModal({
-  defaultName,
-  googleConnected,
-  onClose,
-  onScheduled,
-}: {
-  defaultName: string;
-  googleConnected: boolean;
-  onClose: () => void;
-  /** Called on success with a human-readable summary for the dashboard. */
-  onScheduled: (summary: string | null) => void;
-}) {
-  const [title, setTitle] = useState("");
-  const [when, setWhen] = useState("");
-  const [duration, setDuration] = useState(30);
-  const [addToGoogle, setAddToGoogle] = useState(googleConnected);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [invitees, setInvitees] = useState<string[]>([]);
 
-  async function save() {
-    if (!when) {
-      setErr("Please pick a date and time.");
-      return;
-    }
-    if (new Date(when).getTime() < Date.now() - 60_000) {
-      setErr("That time is in the past — pick a future time.");
-      return;
-    }
-    setSaving(true);
-    setErr(null);
-    try {
-      const res = await fetch("/api/meetings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: title.trim() || `${defaultName}'s meeting`,
-          scheduledAt: new Date(when).toISOString(),
-          durationMins: duration,
-          addToGoogleCalendar: googleConnected && addToGoogle,
-          invitees,
-        }),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setErr(d.error || "Could not schedule.");
-        return;
-      }
-      const bits = ["Meeting scheduled ✓"];
-      if (d.invited > 0) {
-        bits.push(
-          d.emailed > 0
-            ? `${d.emailed} of ${d.invited} invitation email${
-                d.invited === 1 ? "" : "s"
-              } sent`
-            : `${d.invited} invited (email isn't configured — share the link)`
-        );
-      }
-      onScheduled(bits.join(" · "));
-    } finally {
-      setSaving(false);
-    }
-  }
 
-  return (
-    <Modal title="Schedule a meeting" onClose={onClose}>
-      <label className="block mb-3">
-        <span className="text-sm font-medium text-teams-dark">Title</span>
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Add a title"
-          className="mt-1 w-full rounded-md border border-teams-line px-3 py-2 outline-none focus:border-teams-purple focus:ring-1 focus:ring-teams-purple"
-        />
-      </label>
-      <InviteePicker value={invitees} onChange={setInvitees} />
-      <div className="flex gap-3">
-        <label className="block flex-1">
-          <span className="text-sm font-medium text-teams-dark">
-            Date and time
-          </span>
-          <input
-            type="datetime-local"
-            value={when}
-            onChange={(e) => setWhen(e.target.value)}
-            className="mt-1 w-full rounded-md border border-teams-line px-3 py-2 outline-none focus:border-teams-purple focus:ring-1 focus:ring-teams-purple"
-          />
-        </label>
-        <label className="block w-32">
-          <span className="text-sm font-medium text-teams-dark">Duration</span>
-          <select
-            value={duration}
-            onChange={(e) => setDuration(Number(e.target.value))}
-            className="mt-1 w-full rounded-md border border-teams-line px-3 py-2 outline-none focus:border-teams-purple focus:ring-1 focus:ring-teams-purple bg-white"
-          >
-            <option value={15}>15 min</option>
-            <option value={30}>30 min</option>
-            <option value={45}>45 min</option>
-            <option value={60}>1 hour</option>
-            <option value={90}>1.5 hours</option>
-            <option value={120}>2 hours</option>
-          </select>
-        </label>
-      </div>
-      {googleConnected && (
-        <label className="flex items-center gap-2 mt-3 text-sm text-teams-dark cursor-pointer">
-          <input
-            type="checkbox"
-            checked={addToGoogle}
-            onChange={(e) => setAddToGoogle(e.target.checked)}
-            className="rounded border-teams-line text-teams-purple focus:ring-teams-purple"
-          />
-          <GoogleIcon />
-          Add to my Google Calendar
-        </label>
-      )}
-      {err && <p className="text-sm text-red-600 mt-2">{err}</p>}
-      <div className="flex justify-end gap-2 mt-4">
-        <button
-          onClick={onClose}
-          className="text-sm rounded-md px-4 py-2 hover:bg-teams-bg"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={save}
-          disabled={saving}
-          className="text-sm bg-teams-purple hover:bg-teams-purpleDark disabled:opacity-60 text-white rounded-md px-4 py-2"
-        >
-          {saving ? "Saving…" : "Schedule"}
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-/**
- * The "normal" calendar: an in-app month grid of scheduled meetings, no
- * Google account needed. Click a meeting chip to jump into it.
- */
-function MonthCalendar({
-  meetings,
-  onJoin,
-}: {
-  meetings: Meeting[];
-  onJoin: (roomId: string) => void;
-}) {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth()); // 0-based
-
-  // Meetings bucketed by local calendar day.
-  const byDay = new Map<string, Meeting[]>();
-  for (const m of meetings) {
-    const d = new Date(m.scheduledAt!);
-    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-    byDay.set(key, [...(byDay.get(key) || []), m]);
-  }
-
-  const first = new Date(year, month, 1);
-  const startOffset = first.getDay(); // Sunday-first, like phone calendars
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells: (number | null)[] = [
-    ...Array.from({ length: startOffset }, () => null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ];
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const monthLabel = first.toLocaleDateString([], {
-    month: "long",
-    year: "numeric",
-  });
-  const isToday = (day: number) =>
-    year === now.getFullYear() && month === now.getMonth() && day === now.getDate();
-
-  function shift(delta: number) {
-    const d = new Date(year, month + delta, 1);
-    setYear(d.getFullYear());
-    setMonth(d.getMonth());
-  }
-
-  return (
-    <div className="border border-teams-line rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-teams-line bg-teams-bg">
-        <button
-          onClick={() => shift(-1)}
-          aria-label="Previous month"
-          className="w-8 h-8 rounded-md hover:bg-white text-teams-gray"
-        >
-          ‹
-        </button>
-        <span className="font-semibold text-teams-dark">{monthLabel}</span>
-        <button
-          onClick={() => shift(1)}
-          aria-label="Next month"
-          className="w-8 h-8 rounded-md hover:bg-white text-teams-gray"
-        >
-          ›
-        </button>
-      </div>
-      <div className="grid grid-cols-7 text-center text-[11px] font-semibold uppercase tracking-wide text-teams-gray border-b border-teams-line">
-        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-          <div key={d} className="py-1.5">
-            {d}
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7">
-        {cells.map((day, i) => {
-          const dayMeetings = day
-            ? byDay.get(`${year}-${month}-${day}`) || []
-            : [];
-          return (
-            <div
-              key={i}
-              className={`min-h-[72px] sm:min-h-[88px] p-1 border-b border-r border-teams-line/60 [&:nth-child(7n)]:border-r-0 ${
-                day === null ? "bg-teams-bg/40" : ""
-              }`}
-            >
-              {day !== null && (
-                <>
-                  <span
-                    className={`inline-flex items-center justify-center w-6 h-6 text-xs rounded-full mb-0.5 ${
-                      isToday(day)
-                        ? "bg-teams-purple text-white font-bold"
-                        : "text-teams-dark"
-                    }`}
-                  >
-                    {day}
-                  </span>
-                  <div className="space-y-0.5">
-                    {dayMeetings.slice(0, 2).map((m) => (
-                      <button
-                        key={m.roomId}
-                        onClick={() => onJoin(m.roomId)}
-                        title={`${m.title} — ${formatWhen(m.scheduledAt!)}`}
-                        className="block w-full text-left text-[10px] sm:text-[11px] leading-tight bg-teams-purple/10 text-teams-purple hover:bg-teams-purple hover:text-white rounded px-1 py-0.5 truncate transition"
-                      >
-                        {new Date(m.scheduledAt!).toLocaleTimeString([], {
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}{" "}
-                        {m.title}
-                      </button>
-                    ))}
-                    {dayMeetings.length > 2 && (
-                      <span className="block text-[10px] text-teams-gray px-1">
-                        +{dayMeetings.length - 2} more
-                      </span>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/**
- * Teams-style "Enter name or email": type to search your contacts or paste an
- * email, Enter/comma to add, chips with ✕ to remove. Anything valid-looking
- * that isn't a contact is invited by plain email.
- */
-function InviteePicker({
-  value,
-  onChange,
-}: {
-  value: string[];
-  onChange: (v: string[]) => void;
-}) {
-  const [text, setText] = useState("");
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [focus, setFocus] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/chat/contacts")
-      .then((r) => (r.ok ? r.json() : { contacts: [] }))
-      .then((d) =>
-        setContacts(
-          (d.contacts || []).map((c: Contact) => ({
-            id: c.id,
-            name: c.name,
-            email: c.email,
-          }))
-        )
-      )
-      .catch(() => {});
-  }, []);
-
-  const q = text.trim().toLowerCase();
-  const suggestions =
-    q.length > 0
-      ? contacts
-          .filter(
-            (c) =>
-              !value.includes(c.email.toLowerCase()) &&
-              (c.name.toLowerCase().includes(q) ||
-                c.email.toLowerCase().includes(q))
-          )
-          .slice(0, 6)
-      : [];
-
-  function add(email: string) {
-    const e = email.trim().toLowerCase();
-    if (!EMAIL_RE.test(e) || value.includes(e)) return;
-    onChange([...value, e]);
-    setText("");
-  }
-
-  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter" || e.key === "," || e.key === ";") {
-      e.preventDefault();
-      // Prefer the top contact match; otherwise take the typed email.
-      if (suggestions.length > 0 && !EMAIL_RE.test(text.trim())) {
-        add(suggestions[0].email);
-      } else {
-        add(text);
-      }
-    } else if (e.key === "Backspace" && !text && value.length > 0) {
-      onChange(value.slice(0, -1));
-    }
-  }
-
-  const nameFor = (email: string) =>
-    contacts.find((c) => c.email.toLowerCase() === email)?.name || email;
-
-  return (
-    <label className="block mb-3 relative">
-      <span className="text-sm font-medium text-teams-dark">
-        Invite people
-      </span>
-      <div className="mt-1 w-full rounded-md border border-teams-line px-2 py-1.5 flex flex-wrap gap-1.5 focus-within:border-teams-purple focus-within:ring-1 focus-within:ring-teams-purple">
-        {value.map((email) => (
-          <span
-            key={email}
-            className="inline-flex items-center gap-1 bg-teams-purple/10 text-teams-purple text-sm rounded-full pl-2.5 pr-1 py-0.5"
-          >
-            <span className="max-w-[180px] truncate">{nameFor(email)}</span>
-            <button
-              type="button"
-              onClick={() => onChange(value.filter((v) => v !== email))}
-              aria-label={`Remove ${email}`}
-              className="w-4 h-4 rounded-full hover:bg-teams-purple/20 flex items-center justify-center text-xs leading-none"
-            >
-              ✕
-            </button>
-          </span>
-        ))}
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          onFocus={() => setFocus(true)}
-          onBlur={() => setTimeout(() => setFocus(false), 150)}
-          placeholder={value.length === 0 ? "Enter name or email" : ""}
-          className="flex-1 min-w-[140px] px-1 py-1 outline-none text-sm"
-        />
-      </div>
-      {focus && suggestions.length > 0 && (
-        <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-teams-line rounded-lg shadow-lg py-1 max-h-52 overflow-y-auto">
-          {suggestions.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              // onMouseDown so it fires before the input's blur hides the list.
-              onMouseDown={(e) => {
-                e.preventDefault();
-                add(c.email);
-              }}
-              className="w-full text-left px-3 py-2 hover:bg-teams-bg flex flex-col"
-            >
-              <span className="text-sm text-teams-dark">{c.name}</span>
-              <span className="text-xs text-teams-gray">{c.email}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      <span className="block mt-1 text-xs text-teams-gray">
-        They&apos;ll get an email invite, see it on their dashboard, and skip
-        the waiting room.
-      </span>
-    </label>
-  );
-}
-
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center px-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-teams-dark">{title}</h3>
-          <button
-            onClick={onClose}
-            className="text-teams-gray hover:text-teams-dark"
-          >
-            ✕
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function DateBadge({ iso }: { iso: string }) {
   const d = new Date(iso);
@@ -1065,74 +554,6 @@ function RecordingStatus({ status }: { status: Recording["status"] }) {
   );
 }
 
-function AddToCalendarMenu({ meeting }: { meeting: Meeting }) {
-  const [open, setOpen] = useState(false);
-  const [origin, setOrigin] = useState("");
-  useEffect(() => setOrigin(window.location.origin), []);
-
-  const ev = origin
-    ? meetingEvent(origin, {
-        roomId: meeting.roomId,
-        title: meeting.title,
-        scheduledAt: meeting.scheduledAt,
-        durationMins: meeting.durationMins,
-      })
-    : null;
-
-  const item =
-    "block px-3 py-2 text-sm text-teams-dark hover:bg-teams-bg text-left";
-
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        title="Add to calendar"
-        className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5 inline-flex items-center gap-1.5"
-      >
-        <CalIcon />
-        <span className="hidden sm:inline">Calendar</span>
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-1 z-20 bg-white border border-teams-line rounded-lg shadow-lg py-1 w-52">
-            {ev && (
-              <>
-                <a
-                  href={googleCalendarUrl(ev)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setOpen(false)}
-                  className={item}
-                >
-                  Google Calendar
-                </a>
-                <a
-                  href={outlookCalendarUrl(ev)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setOpen(false)}
-                  className={item}
-                >
-                  Outlook
-                </a>
-              </>
-            )}
-            <a
-              href={`/api/meetings/ics?roomId=${encodeURIComponent(
-                meeting.roomId
-              )}`}
-              onClick={() => setOpen(false)}
-              className={item}
-            >
-              Apple / Download .ics
-            </a>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 function CalIcon() {
   return (
@@ -1156,28 +577,6 @@ function CalIcon() {
   );
 }
 
-function GoogleIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 48 48" aria-hidden="true">
-      <path
-        fill="#4285F4"
-        d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"
-      />
-      <path
-        fill="#34A853"
-        d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7A21.99 21.99 0 0 0 24 46z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M11.69 28.18A13.2 13.2 0 0 1 11 24c0-1.45.25-2.86.69-4.18v-5.7H4.34A21.99 21.99 0 0 0 2 24c0 3.55.85 6.91 2.34 9.88l7.35-5.7z"
-      />
-      <path
-        fill="#EA4335"
-        d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.94 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"
-      />
-    </svg>
-  );
-}
 
 function VideoIcon() {
   return (
