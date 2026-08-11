@@ -92,6 +92,79 @@ body {
   transform-origin: bottom center;
 }
 
+/* ---- Active-speaker indicators ---- */
+
+/* Animated equalizer bars shown while someone is talking. */
+.speak-bars {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 13px;
+}
+.speak-bars span {
+  width: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  animation: speak-bounce 0.9s ease-in-out infinite;
+}
+.speak-bars span:nth-child(2) {
+  animation-delay: 0.25s;
+}
+.speak-bars span:nth-child(3) {
+  animation-delay: 0.5s;
+}
+@keyframes speak-bounce {
+  0%,
+  100% {
+    height: 4px;
+  }
+  50% {
+    height: 13px;
+  }
+}
+
+/* Pulsing glow around the speaking tile — unmissable, like Teams. */
+@keyframes speak-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgb(139 145 240 / 0.9), 0 0 14px rgb(139 145 240 / 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgb(139 145 240 / 0.55), 0 0 6px rgb(139 145 240 / 0.3);
+  }
+}
+.speaking-glow {
+  animation: speak-glow 1.4s ease-in-out infinite;
+}
+/* Flush (edge-to-edge) tiles glow inward so the seamless grid stays intact. */
+@keyframes speak-glow-inset {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 3px rgb(139 145 240 / 0.95);
+  }
+  50% {
+    box-shadow: inset 0 0 0 3px rgb(139 145 240 / 0.5);
+  }
+}
+.speaking-glow-inset {
+  animation: speak-glow-inset 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .speak-bars span,
+  .speaking-glow,
+  .speaking-glow-inset {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+  }
+  .speaking-glow {
+    box-shadow: 0 0 0 3px rgb(139 145 240 / 0.9);
+  }
+  .speaking-glow-inset {
+    box-shadow: inset 0 0 0 3px rgb(139 145 240 / 0.95);
+  }
+}
+
 /* Incoming-call popup: slide in and pulse gently while ringing. */
 @keyframes call-pop-in {
   0% {

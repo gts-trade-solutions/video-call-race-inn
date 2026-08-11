@@ -1516,7 +1516,7 @@ function Tile({
         spotlighted
           ? "ring-teams-purple"
           : isSpeaking
-          ? "ring-teams-purple/60"
+          ? `ring-transparent ${flush ? "speaking-glow-inset" : "speaking-glow"}`
           : "ring-transparent"
       }`}
     >
@@ -1571,15 +1571,36 @@ function Tile({
         </div>
       )}
 
-      {/* name pill */}
-      <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-black/55 rounded-md px-2 py-1 max-w-[90%]">
-        {micMuted ? <MicOffMini /> : <MicMini />}
+      {/* name pill — animated bars while this person is talking */}
+      <div
+        className={`absolute bottom-2 left-2 flex items-center gap-1.5 rounded-md px-2 py-1 max-w-[90%] transition-colors ${
+          isSpeaking && !micMuted ? "bg-teams-purple/90" : "bg-black/55"
+        }`}
+      >
+        {micMuted ? (
+          <MicOffMini />
+        ) : isSpeaking ? (
+          <SpeakingBars />
+        ) : (
+          <MicMini />
+        )}
         <span className="text-xs truncate">
           {name}
           {p.isLocal ? " (You)" : ""}
         </span>
       </div>
     </div>
+  );
+}
+
+/** Animated equalizer — the "this person is talking" signal. */
+function SpeakingBars() {
+  return (
+    <span className="speak-bars text-white" aria-label="Speaking">
+      <span />
+      <span />
+      <span />
+    </span>
   );
 }
 
@@ -1783,7 +1804,15 @@ function PeoplePanel({
                 </span>
               )}
               <div className="flex items-center gap-1.5 text-gray-300">
-                {p.isMicrophoneEnabled ? <MicMini /> : <MicOffMini />}
+                {!p.isMicrophoneEnabled ? (
+                  <MicOffMini />
+                ) : p.isSpeaking ? (
+                  <span className="text-teams-purple">
+                    <SpeakingBars />
+                  </span>
+                ) : (
+                  <MicMini />
+                )}
                 {p.isCameraEnabled ? <CamMini /> : <CamOffMini />}
               </div>
 
