@@ -259,11 +259,12 @@ export default function TeamsCall({
   const [shareBusy, setShareBusy] = useState(false);
   const toggleShare = useCallback(async () => {
     if (!localParticipant || shareBusy) return;
-    // Recent Android Chrome can share; iOS Safari can't. Keep the button and
-    // explain, rather than silently hiding a feature people look for.
+    // Phone browsers don't expose screen capture (only native apps can, via
+    // MediaProjection/ReplayKit). Keep the button and explain, rather than
+    // silently hiding a feature people look for.
     if (!navigator.mediaDevices?.getDisplayMedia) {
       notify(
-        "This browser can't share the screen. On a phone, use a recent Chrome; on iPhone it isn't supported."
+        "Phones can't share their screen from a browser — join from a laptop or desktop to present. You can still watch what others share."
       );
       return;
     }
@@ -703,17 +704,36 @@ export default function TeamsCall({
 
 /* =====================  Responsive helper  ===================== */
 
-/** True below Tailwind's `sm` breakpoint (640px) — i.e. phones. */
+/**
+ * True on phones in either orientation. Width alone misses landscape phones
+ * (a rotated phone is 800-950px wide) — those are caught by the short-and-
+ * touch clause instead, so they get the phone call layout, not desktop's.
+ */
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 639px)");
+    const mq = window.matchMedia(
+      "(max-width: 639px), ((max-height: 500px) and (hover: none))"
+    );
     const apply = () => setIsMobile(mq.matches);
     apply();
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
   }, []);
   return isMobile;
+}
+
+/** Orientation, live — drives how the phone grid splits rows vs columns. */
+function useIsLandscape() {
+  const [landscape, setLandscape] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(orientation: landscape)");
+    const apply = () => setLandscape(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  return landscape;
 }
 
 /* =====================  Stage layouts  ===================== */
@@ -731,15 +751,26 @@ function MobileGrid({
   onSpotlight: (identity: string) => void;
 }) {
   const n = tiles.length;
-  const cols = n <= 2 ? "grid-cols-1" : "grid-cols-2";
+  const landscape = useIsLandscape();
+  // Portrait: stack (1 col up to 2 people, then 2 cols) — tall tiles suit
+  // portrait cameras. Landscape flips it: as few ROWS as possible, so tiles
+  // stay wide and faces aren't squeezed into letterbox strips.
+  const cols = landscape
+    ? Math.min(n, n <= 3 ? 3 : Math.ceil(n / 2))
+    : n <= 2
+      ? 1
+      : 2;
+  const spanLast = !landscape && n > 2 && n % 2 === 1;
   return (
-    <div className={`grid ${cols} auto-rows-fr gap-[2px] h-full w-full bg-black`}>
+    <div
+      className="grid auto-rows-fr gap-[2px] h-full w-full bg-black"
+      style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+    >
       {tiles.map((t, i) => (
         <div
           key={t.participant.identity}
-          className={`h-full min-h-0 ${
-            n > 2 && n % 2 === 1 && i === n - 1 ? "col-span-2" : ""
-          }`}
+          className="h-full min-h-0"
+          style={spanLast && i === n - 1 ? { gridColumn: "span 2" } : undefined}
         >
           <Tile
             trackRef={t}

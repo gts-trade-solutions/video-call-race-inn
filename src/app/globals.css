@@ -46,8 +46,9 @@ body {
   font-size: 11px;
   line-height: 1;
 }
-/* On phones, drop the button labels so the control bar fits (icon-only). */
-@media (max-width: 640px) {
+/* On phones — portrait (narrow) or landscape (short + touch) — drop the
+   button labels so the control bar stays one compact icon row. */
+@media (max-width: 640px), ((max-height: 500px) and (hover: none)) {
   .ctrl-label {
     display: none;
   }
