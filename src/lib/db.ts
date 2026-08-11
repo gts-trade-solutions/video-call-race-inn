@@ -252,6 +252,47 @@ export function ensureSchema(): Promise<void> {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
 
+      // Meeting invitations (Teams-style "Enter name or email"). Stored by
+      // email so people can be invited before they ever sign up; user_id is
+      // filled in when the email matches a registered account.
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS meeting_invites (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          meeting_id INT NOT NULL,
+          email VARCHAR(190) NOT NULL,
+          user_id INT NULL,
+          email_sent TINYINT(1) NOT NULL DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uniq_invite (meeting_id, email),
+          INDEX idx_inv_user (user_id),
+          INDEX idx_inv_email (email),
+          CONSTRAINT fk_inv_meeting FOREIGN KEY (meeting_id)
+            REFERENCES meetings(id) ON DELETE CASCADE,
+          CONSTRAINT fk_inv_user FOREIGN KEY (user_id)
+            REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      // Co-hosts ("presenters"): people the owner promoted so they can record,
+      // admit from the lobby and manage participants. One row per promotion.
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS meeting_cohosts (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          meeting_id INT NOT NULL,
+          user_id INT NOT NULL,
+          granted_by INT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uniq_cohost (meeting_id, user_id),
+          INDEX idx_cohost_meeting (meeting_id),
+          CONSTRAINT fk_cohost_meeting FOREIGN KEY (meeting_id)
+            REFERENCES meetings(id) ON DELETE CASCADE,
+          CONSTRAINT fk_cohost_user FOREIGN KEY (user_id)
+            REFERENCES users(id) ON DELETE CASCADE,
+          CONSTRAINT fk_cohost_granter FOREIGN KEY (granted_by)
+            REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
       // Password reset codes — we store only a hash of the 4-digit PIN.
       await pool.query(`
         CREATE TABLE IF NOT EXISTS password_resets (

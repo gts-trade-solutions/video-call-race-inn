@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   useTracks,
   useParticipants,
@@ -16,13 +24,27 @@ import {
   type TrackReference,
   type TrackReferenceOrPlaceholder,
 } from "@livekit/components-react";
-import { Track, type Participant, type LocalVideoTrack } from "livekit-client";
+import { Track, type Participant } from "livekit-client";
+import { Toasts, useToasts } from "@/components/call/Toasts";
+import EffectsPanel from "@/components/call/EffectsPanel";
+import { useVideoEffects } from "@/components/call/useVideoEffects";
+import { useRaiseHand, type UseRaiseHand } from "@/components/call/useRaiseHand";
 import {
-  BackgroundProcessor,
-  supportsBackgroundProcessors,
-} from "@livekit/track-processors";
+  useShareControl,
+  type UseShareControl,
+} from "@/components/call/useShareControl";
+import {
+  useMeetingRoles,
+  type MeetingRoles,
+} from "@/components/call/useMeetingRoles";
 
-type Panel = "none" | "chat" | "people";
+/**
+ * Raised hands, shared with every tile without threading the map through each
+ * stage layout. Read-only — all mutations go through the useRaiseHand hook.
+ */
+const HandsContext = createContext<Record<string, number>>({});
+
+type Panel = "none" | "chat" | "people" | "effects";
 type WaitingPerson = {
   userId: number;
   name: string;
@@ -40,9 +62,17 @@ type CallChatMsg = {
 export default function TeamsCall({
   room,
   isHost = false,
+  isOwner = false,
+  ownerIdentity = "",
+  coHostIdentities = [],
 }: {
   room: string;
+  /** May run the meeting — the owner or a co-host. */
   isHost?: boolean;
+  /** Created the meeting; only they can promote co-hosts. */
+  isOwner?: boolean;
+  ownerIdentity?: string;
+  coHostIdentities?: string[];
 }) {
   const [panel, setPanel] = useState<Panel>("none");
   const [copied, setCopied] = useState(false);
@@ -70,6 +100,44 @@ export default function TeamsCall({
     (t) => t.source === Track.Source.ScreenShare && t.publication
   );
   const isSharing = screenShares.length > 0;
+  const presenterIdentity = screenShares[0]?.participant.identity ?? null;
+
+  // ----- Roles, notifications, hands and screen-share control -----
+  const { toasts, push: notify } = useToasts();
+  const roles = useMeetingRoles(room, {
+    isHost,
+    isOwner,
+    ownerIdentity,
+    coHostIdentities,
+  });
+  const canManage = roles.canManage;
+
+  const nameOf = useCallback(
+    (identity: string) => {
+      const p = participants.find((x) => x.identity === identity);
+      return p?.name || p?.identity || "Someone";
+    },
+    [participants]
+  );
+  // The toast callbacks below are stable across renders on purpose: passing a
+  // fresh closure each time would re-register the data-channel handlers.
+  const nameOfRef = useRef(nameOf);
+  nameOfRef.current = nameOf;
+
+  const hands = useRaiseHand({
+    managerIdentities: roles.managerIdentities,
+    onRaised: useCallback(
+      (identity: string) =>
+        notify(`${nameOfRef.current(identity)} raised their hand`),
+      [notify]
+    ),
+  });
+
+  const shareControl = useShareControl({
+    presenterIdentity,
+    onNotice: notify,
+  });
+  const handCount = hands.order.length;
 
   // In-call chat over a reliable data channel (same mechanism as reactions).
   const [chatMsgs, setChatMsgs] = useState<CallChatMsg[]>([]);
@@ -184,86 +252,8 @@ export default function TeamsCall({
     return () => clearInterval(t);
   }, [refreshRecording]);
 
-  // ----- Background blur (local camera processor) -----
-  const [blurOn, setBlurOn] = useState(false);
-  const [blurBusy, setBlurBusy] = useState(false);
-  const processorRef = useRef<ReturnType<typeof BackgroundProcessor> | null>(
-    null
-  );
-
-  const camTrack = useCallback((): LocalVideoTrack | undefined => {
-    const pub = localParticipant?.getTrackPublication(Track.Source.Camera);
-    return (pub?.track as LocalVideoTrack | undefined) ?? undefined;
-  }, [localParticipant]);
-
-  const applyBlur = useCallback(
-    async (on: boolean): Promise<boolean> => {
-      const track = camTrack();
-      if (!track) return true; // camera off — will apply when it turns on
-      try {
-        if (on) {
-          if (!processorRef.current) {
-            processorRef.current = BackgroundProcessor({
-              mode: "background-blur",
-              blurRadius: 12,
-              // Serve the segmentation model and WASM from our own origin.
-              // The defaults hit jsdelivr + storage.googleapis.com at runtime;
-              // if those are blocked or time out the processor still starts but
-              // renders BLACK FRAMES instead of blurred video.
-              assetPaths: {
-                tasksVisionFileSet: "/mediapipe/wasm",
-                modelAssetPath: "/mediapipe/selfie_segmenter.tflite",
-              },
-            });
-          }
-          await track.setProcessor(processorRef.current);
-        } else {
-          await track.stopProcessor();
-        }
-        return true;
-      } catch (e) {
-        console.error("background blur error:", e);
-        // Never leave the user staring at a dead/!black preview — drop back to
-        // the raw camera track.
-        try {
-          await track.stopProcessor();
-        } catch {
-          /* nothing else we can do */
-        }
-        processorRef.current = null;
-        return false;
-      }
-    },
-    [camTrack]
-  );
-
-  const toggleBlur = useCallback(async () => {
-    if (blurBusy) return;
-    if (!supportsBackgroundProcessors()) {
-      alert("Background blur isn't supported in this browser.");
-      return;
-    }
-    setBlurBusy(true);
-    const next = !blurOn;
-    const ok = await applyBlur(next);
-    // Only flip the button if it actually worked, so the UI can't claim blur
-    // is on while the camera is black or unprocessed.
-    setBlurOn(ok ? next : false);
-    setBlurBusy(false);
-    if (!ok && next) {
-      alert(
-        "Couldn't start background blur on this device. Your camera has been left unblurred."
-      );
-    }
-  }, [blurBusy, blurOn, applyBlur]);
-
-  // Re-apply blur to a fresh camera track after the camera is toggled off/on.
-  useEffect(() => {
-    if (blurOn && isCameraEnabled) {
-      const id = setTimeout(() => applyBlur(true), 250);
-      return () => clearTimeout(id);
-    }
-  }, [isCameraEnabled, blurOn, applyBlur]);
+  // ----- Video effects: none / blur / virtual background (Teams-style) -----
+  const effects = useVideoEffects();
 
   // ----- Spotlight: everyone sees one person big -----
   const [spotlight, setSpotlight] = useState<string | null>(null);
@@ -286,9 +276,6 @@ export default function TeamsCall({
     [sendSpotlight]
   );
 
-  // Local (in-browser) recording that saves an MP4/WebM to the user's device.
-  const localRec = useLocalRecorder(room);
-
   // ----- Waiting room: host sees who's knocking and admits/denies -----
   const [waiting, setWaiting] = useState<WaitingPerson[]>([]);
   // Ids we've just admitted/denied. A poll already in flight returns the
@@ -297,7 +284,7 @@ export default function TeamsCall({
   const decidedRef = useRef<Set<number>>(new Set());
 
   const refreshLobby = useCallback(async () => {
-    if (!isHost) return;
+    if (!canManage) return;
     try {
       const res = await fetch(
         `/api/livekit/lobby?room=${encodeURIComponent(room)}`
@@ -310,14 +297,14 @@ export default function TeamsCall({
     } catch {
       /* ignore transient errors */
     }
-  }, [isHost, room]);
+  }, [canManage, room]);
 
   useEffect(() => {
-    if (!isHost) return;
+    if (!canManage) return;
     refreshLobby();
     const t = setInterval(refreshLobby, 4000);
     return () => clearInterval(t);
-  }, [isHost, refreshLobby]);
+  }, [canManage, refreshLobby]);
 
   const decideLobby = useCallback(
     async (userId: number, action: "admit" | "deny") => {
@@ -374,196 +361,263 @@ export default function TeamsCall({
     ? cameraTiles.filter((t) => t.participant.identity !== spotlight)
     : cameraTiles;
 
-  // ----- Teams-style phone layout: one big speaker + self PiP -----
+  // ----- Phone layout -----
+  // Default is a full-bleed equal grid (everyone the same size, edge to edge,
+  // like WhatsApp / Teams mobile). An explicit spotlight switches to the
+  // one-big-speaker stage with a self PiP.
   const isMobile = useIsMobile();
   const selfTile = cameraTiles.find((t) => t.participant.isLocal);
   const remoteTiles = cameraTiles.filter((t) => !t.participant.isLocal);
-  // Who gets the big tile: an explicit spotlight wins, otherwise whoever is
-  // speaking, otherwise the most recent speaker, otherwise the first remote.
-  const dominantRemote =
-    (spotlightTile && !spotlightTile.participant.isLocal
-      ? spotlightTile
-      : undefined) ??
-    [...remoteTiles].sort((a, b) => {
-      const sp = Number(b.participant.isSpeaking) - Number(a.participant.isSpeaking);
-      if (sp !== 0) return sp;
-      return (
-        (b.participant.lastSpokeAt?.getTime() ?? 0) -
-        (a.participant.lastSpokeAt?.getTime() ?? 0)
-      );
-    })[0];
-  // Alone in the call → show yourself big rather than an empty stage.
-  const mobileMain = dominantRemote ?? selfTile;
-  const mobileOthers = remoteTiles.filter(
-    (t) => t.participant.identity !== mobileMain?.participant.identity
-  );
+  const mobileOthers = spotlightTile
+    ? remoteTiles.filter(
+        (t) => t.participant.identity !== spotlightTile.participant.identity
+      )
+    : remoteTiles;
+  const mobileGridActive = isMobile && !isSharing && !spotlightTile;
+
+  // On a phone the call chrome (header + control bar) hides on tap so the
+  // video really is full-screen; tapping again brings it back.
+  const [chromeHidden, setChromeHidden] = useState(false);
+  const hideChrome = isMobile && chromeHidden && panel === "none";
 
   return (
-    <div className="flex flex-col h-full bg-teams-darker text-white overflow-x-hidden">
-      <RoomAudioRenderer />
-      <ConnectionStateToast />
-      <FloatingReactions />
+    <HandsContext.Provider value={hands.hands}>
+      <div className="flex flex-col h-full bg-teams-darker text-white overflow-x-hidden">
+        <RoomAudioRenderer />
+        <ConnectionStateToast />
+        <FloatingReactions />
+        <Toasts items={toasts} />
 
-      {isHost && waiting.length > 0 && (
-        <LobbyBanner
-          waiting={waiting}
-          onAdmit={(id) => decideLobby(id, "admit")}
-          onDeny={(id) => decideLobby(id, "deny")}
-          onAdmitAll={admitAll}
-        />
-      )}
+        {shareControl.amPresenter && shareControl.requests.length > 0 && (
+          <ControlRequests
+            requests={shareControl.requests}
+            nameOf={nameOf}
+            onAllow={shareControl.grantControl}
+            onDeny={shareControl.denyControl}
+          />
+        )}
 
-      {/* ---------- Top bar ---------- */}
-      <header className="h-14 shrink-0 flex items-center justify-between gap-2 px-3 sm:px-4 bg-teams-darker border-b border-white/10">
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <div className="bg-white rounded px-1.5 py-1 flex items-center shrink-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/logo.svg"
-              alt="Race Innovations"
-              className="h-5 sm:h-7 w-auto object-contain"
-            />
-          </div>
-          <div className="leading-tight min-w-0">
-            <div className="text-sm font-semibold leading-tight">Meeting</div>
-            <div className="text-xs text-gray-400 font-mono truncate">
-              {room}
+        {canManage && waiting.length > 0 && (
+          <LobbyBanner
+            waiting={waiting}
+            onAdmit={(id) => decideLobby(id, "admit")}
+            onDeny={(id) => decideLobby(id, "deny")}
+            onAdmitAll={admitAll}
+          />
+        )}
+
+        {/* ---------- Top bar ---------- */}
+        <header
+          className={`h-14 shrink-0 items-center justify-between gap-2 px-3 sm:px-4 bg-teams-darker border-b border-white/10 ${
+            hideChrome ? "hidden" : "flex"
+          }`}
+        >
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="bg-white rounded px-1.5 py-1 flex items-center shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo.svg"
+                alt="Race Innovations"
+                className="h-5 sm:h-7 w-auto object-contain"
+              />
+            </div>
+            <div className="leading-tight min-w-0">
+              <div className="text-sm font-semibold leading-tight">Meeting</div>
+              <div className="text-xs text-gray-400 font-mono truncate">
+                {room}
+              </div>
             </div>
           </div>
-        </div>
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {recording && (
-            <span className="flex items-center gap-1.5 text-xs font-semibold text-red-300 bg-red-500/15 border border-red-500/40 rounded-md px-2 py-1">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              REC
-            </span>
-          )}
-          <CallTimer />
-          <button
-            onClick={copyInvite}
-            className="flex items-center gap-1.5 text-sm bg-white/10 hover:bg-white/20 rounded-md px-2.5 sm:px-3 py-1.5 transition shrink-0"
-            title="Copy invite link"
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {recording && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-300 bg-red-500/15 border border-red-500/40 rounded-md px-2 py-1">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                REC
+              </span>
+            )}
+            <CallTimer />
+            <button
+              onClick={copyInvite}
+              className="flex items-center gap-1.5 text-sm bg-white/10 hover:bg-white/20 rounded-md px-2.5 sm:px-3 py-1.5 transition shrink-0"
+              title="Copy invite link"
+            >
+              <CopyIcon />
+              <span className="hidden sm:inline">
+                {copied ? "Copied!" : "Copy link"}
+              </span>
+            </button>
+          </div>
+        </header>
+
+        {/* ---------- Body: stage + side panel ---------- */}
+        <div className="flex flex-1 min-h-0 relative">
+          <main
+            className={`flex-1 min-w-0 ${
+              mobileGridActive ? "p-0" : "p-3 sm:p-4"
+            }`}
+            onClick={
+              isMobile && !isSharing
+                ? () => setChromeHidden((h) => !h)
+                : undefined
+            }
           >
-            <CopyIcon />
-            <span className="hidden sm:inline">
-              {copied ? "Copied!" : "Copy link"}
-            </span>
-          </button>
-        </div>
-      </header>
-
-      {/* ---------- Body: stage + side panel ---------- */}
-      <div className="flex flex-1 min-h-0 relative">
-        <main className="flex-1 min-w-0 p-3 sm:p-4">
-          {isSharing ? (
-            <ShareLayout
-              screenShares={screenShares}
-              cameraTiles={cameraTiles}
-            />
-          ) : isMobile && mobileMain ? (
-            <MobileStage
-              main={mobileMain}
-              self={
-                // Don't repeat yourself in the PiP if you're already the big tile.
-                selfTile &&
-                selfTile.participant.identity !== mobileMain.participant.identity
-                  ? selfTile
-                  : undefined
-              }
-              others={mobileOthers}
-              onSpotlight={toggleSpotlight}
-            />
-          ) : spotlightTile ? (
-            <SpotlightLayout
-              main={spotlightTile}
-              others={otherTiles}
-              onSpotlight={toggleSpotlight}
-            />
-          ) : (
-            <GridStage
-              tiles={cameraTiles}
-              spotlight={spotlight}
-              onSpotlight={toggleSpotlight}
-            />
-          )}
-        </main>
-
-        {panel !== "none" && (
-          <aside className="absolute inset-0 z-30 sm:static sm:z-auto w-full sm:w-80 shrink-0 bg-teams-stage sm:border-l border-white/10 flex flex-col">
-            {panel === "chat" ? (
-              <ChatPanel
-                messages={chatMsgs}
-                onSend={sendChat}
-                onClose={() => setPanel("none")}
+            {isSharing ? (
+              <ShareLayout
+                screenShares={screenShares}
+                cameraTiles={cameraTiles}
+                control={shareControl}
+                nameOf={nameOf}
+              />
+            ) : mobileGridActive ? (
+              <MobileGrid tiles={cameraTiles} onSpotlight={toggleSpotlight} />
+            ) : isMobile && spotlightTile ? (
+              <MobileStage
+                main={spotlightTile}
+                self={
+                  // Don't repeat yourself in the PiP if you're already the big tile.
+                  selfTile &&
+                  selfTile.participant.identity !==
+                    spotlightTile.participant.identity
+                    ? selfTile
+                    : undefined
+                }
+                others={mobileOthers}
+                onSpotlight={toggleSpotlight}
+              />
+            ) : spotlightTile ? (
+              <SpotlightLayout
+                main={spotlightTile}
+                others={otherTiles}
+                onSpotlight={toggleSpotlight}
               />
             ) : (
-              <PeoplePanel
-                participants={participants}
-                onClose={() => setPanel("none")}
+              <GridStage
+                tiles={cameraTiles}
+                spotlight={spotlight}
+                onSpotlight={toggleSpotlight}
               />
             )}
-          </aside>
-        )}
-      </div>
+          </main>
 
-      {/* ---------- Control pill ---------- */}
-      <footer className="shrink-0 flex justify-center px-2 pb-3 pt-2">
-        <div className="flex flex-wrap items-center justify-center gap-1.5 bg-teams-stage/95 backdrop-blur rounded-2xl px-2 sm:px-3 py-2 shadow-2xl border border-white/10 max-w-full">
-          <TrackToggle
-            source={Track.Source.Microphone}
-            showIcon={false}
-            aria-label="Toggle microphone"
-            title="Microphone"
-            className={ctrlBtn(isMicrophoneEnabled)}
-          >
-            {isMicrophoneEnabled ? <MicIcon /> : <MicOffIcon />}
-            <span className="ctrl-label">Mic</span>
-          </TrackToggle>
+          {panel !== "none" && (
+            <aside className="absolute inset-0 z-30 sm:static sm:z-auto w-full sm:w-80 shrink-0 bg-teams-stage sm:border-l border-white/10 flex flex-col">
+              {panel === "chat" ? (
+                <ChatPanel
+                  messages={chatMsgs}
+                  onSend={sendChat}
+                  onClose={() => setPanel("none")}
+                />
+              ) : panel === "effects" ? (
+                <PanelShell
+                  title="Video effects"
+                  onClose={() => setPanel("none")}
+                >
+                  <EffectsPanel effects={effects} onNotice={notify} />
+                </PanelShell>
+              ) : (
+                <PeoplePanel
+                  participants={participants}
+                  onClose={() => setPanel("none")}
+                  roles={roles}
+                  hands={hands}
+                  control={shareControl}
+                  onError={notify}
+                />
+              )}
+            </aside>
+          )}
+        </div>
 
-          <TrackToggle
-            source={Track.Source.Camera}
-            showIcon={false}
-            aria-label="Toggle camera"
-            title="Camera"
-            className={ctrlBtn(isCameraEnabled)}
-          >
-            {isCameraEnabled ? <CamIcon /> : <CamOffIcon />}
-            <span className="ctrl-label">Camera</span>
-          </TrackToggle>
+        {/* ---------- Control pill ---------- */}
+        <footer
+          className={`shrink-0 justify-center px-2 pb-3 pt-2 ${
+            hideChrome ? "hidden" : "flex"
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-center gap-1.5 bg-teams-stage/95 backdrop-blur rounded-2xl px-2 sm:px-3 py-2 shadow-2xl border border-white/10 max-w-full">
+            <TrackToggle
+              source={Track.Source.Microphone}
+              showIcon={false}
+              aria-label="Toggle microphone"
+              title="Microphone"
+              className={ctrlBtn(isMicrophoneEnabled)}
+            >
+              {isMicrophoneEnabled ? <MicIcon /> : <MicOffIcon />}
+              <span className="ctrl-label">Mic</span>
+            </TrackToggle>
 
-          <button
-            onClick={toggleBlur}
-            disabled={blurBusy}
-            title={blurOn ? "Turn off background blur" : "Blur my background"}
-            className={ctrlBtn(blurOn) + " disabled:opacity-50"}
-          >
-            <BlurIcon />
-            <span className="ctrl-label">{blurBusy ? "…" : "Blur"}</span>
-          </button>
+            <TrackToggle
+              source={Track.Source.Camera}
+              showIcon={false}
+              aria-label="Toggle camera"
+              title="Camera"
+              className={ctrlBtn(isCameraEnabled)}
+            >
+              {isCameraEnabled ? <CamIcon /> : <CamOffIcon />}
+              <span className="ctrl-label">Camera</span>
+            </TrackToggle>
 
-          <TrackToggle
-            source={Track.Source.ScreenShare}
-            showIcon={false}
-            aria-label="Share screen"
-            title="Share screen"
-            captureOptions={{ audio: true, selfBrowserSurface: "include" }}
-            className={ctrlBtn(isScreenShareEnabled)}
-          >
-            <ShareIcon />
-            <span className="ctrl-label">Share</span>
-          </TrackToggle>
+            <button
+              onClick={() => setPanel(panel === "effects" ? "none" : "effects")}
+              aria-label="Video effects and backgrounds"
+              title="Video effects and backgrounds"
+              className={ctrlBtn(
+                panel === "effects" || effects.effect.mode !== "none"
+              )}
+            >
+              <EffectsIcon />
+              <span className="ctrl-label">Effects</span>
+            </button>
 
-          <ReactionButton />
+            <TrackToggle
+              source={Track.Source.ScreenShare}
+              showIcon={false}
+              aria-label="Share screen"
+              title="Share screen"
+              captureOptions={{ audio: true, selfBrowserSurface: "include" }}
+              className={ctrlBtn(isScreenShareEnabled)}
+            >
+              <ShareIcon />
+              <span className="ctrl-label">Share</span>
+            </TrackToggle>
 
-          {/* Cloud recording is host-only (the API enforces it too). */}
-          {isHost && (
+            <ReactionButton />
+
+            <button
+              onClick={hands.toggleHand}
+              aria-label={hands.myHandUp ? "Lower hand" : "Raise hand"}
+              title={hands.myHandUp ? "Lower your hand" : "Raise your hand"}
+              className={ctrlBtn(hands.myHandUp) + " relative"}
+            >
+              <HandIcon raised={hands.myHandUp} />
+              <span className="ctrl-label">
+                {hands.myHandUp ? "Lower" : "Raise"}
+              </span>
+              {handCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-amber-400 text-black text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">
+                  {handCount > 9 ? "9+" : handCount}
+                </span>
+              )}
+            </button>
+
+            {/* Screen-share control: ask the presenter, or hand it back. */}
+            {isSharing && <ControlButton control={shareControl} />}
+
+            {/* Cloud recording. Attendees see it disabled rather than missing, so
+                it's obvious the meeting *can* be recorded — just not by them. */}
             <button
               onClick={toggleRecording}
-              disabled={recBusy}
-              title={recording ? "Stop recording" : "Record this meeting to S3"}
+              disabled={recBusy || !canManage}
+              title={
+                !canManage
+                  ? "Only the host or a co-host can record this meeting"
+                  : recording
+                    ? "Stop recording"
+                    : "Record this meeting to S3"
+              }
               className={[
                 CTRL_SHAPE,
-                "disabled:opacity-50",
+                "disabled:opacity-40 disabled:cursor-not-allowed",
                 recording
                   ? "bg-red-600 text-white hover:bg-red-700"
                   : "bg-white/5 text-gray-200 hover:bg-white/15",
@@ -574,174 +628,47 @@ export default function TeamsCall({
                 {recBusy ? "…" : recording ? "Stop" : "Record"}
               </span>
             </button>
-          )}
 
-          <button
-            onClick={() => (localRec.recording ? localRec.stop() : localRec.start())}
-            title="Record to your device — pick 'This tab' and enable tab audio"
-            className={[
-              CTRL_SHAPE,
-              localRec.recording
-                ? "bg-red-600 text-white hover:bg-red-700"
-                : "bg-white/5 text-gray-200 hover:bg-white/15",
-            ].join(" ")}
-          >
-            <SaveRecIcon active={localRec.recording} />
-            <span className="ctrl-label">
-              {localRec.recording ? "Stop" : "Download"}
-            </span>
-          </button>
+            <button
+              onClick={() => setPanel(panel === "chat" ? "none" : "chat")}
+              aria-label="Chat"
+              title="Chat"
+              className={ctrlBtn(panel === "chat") + " relative"}
+            >
+              <ChatIcon />
+              <span className="ctrl-label">Chat</span>
+              {unread > 0 && panel !== "chat" && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">
+                  {unread > 9 ? "9+" : unread}
+                </span>
+              )}
+            </button>
 
-          <button
-            onClick={() => setPanel(panel === "chat" ? "none" : "chat")}
-            aria-label="Chat"
-            title="Chat"
-            className={ctrlBtn(panel === "chat") + " relative"}
-          >
-            <ChatIcon />
-            <span className="ctrl-label">Chat</span>
-            {unread > 0 && panel !== "chat" && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">
-                {unread > 9 ? "9+" : unread}
-              </span>
-            )}
-          </button>
+            <button
+              onClick={() => setPanel(panel === "people" ? "none" : "people")}
+              aria-label="People"
+              title="People"
+              className={ctrlBtn(panel === "people")}
+            >
+              <PeopleIcon />
+              <span className="ctrl-label">People ({participants.length})</span>
+            </button>
 
-          <button
-            onClick={() => setPanel(panel === "people" ? "none" : "people")}
-            aria-label="People"
-            title="People"
-            className={ctrlBtn(panel === "people")}
-          >
-            <PeopleIcon />
-            <span className="ctrl-label">People ({participants.length})</span>
-          </button>
-
-          {/* `!` overrides LiveKit's .lk-disconnect-button styles, which
-              otherwise render this as a red-outlined transparent button. */}
-          <DisconnectButton
-            aria-label="Leave meeting"
-            title="Leave meeting"
-            className="flex flex-col items-center justify-center gap-0.5 h-11 w-11 rounded-full sm:h-auto sm:w-auto sm:rounded-xl sm:px-4 sm:py-2 !bg-red-600 hover:!bg-red-700 !text-white !border-0 text-[11px] font-medium transition ml-1"
-          >
-            <LeaveIcon />
-            <span className="ctrl-label">Leave</span>
-          </DisconnectButton>
-        </div>
-      </footer>
-    </div>
+            {/* `!` overrides LiveKit's .lk-disconnect-button styles, which
+                otherwise render this as a red-outlined transparent button. */}
+            <DisconnectButton
+              aria-label="Leave meeting"
+              title="Leave meeting"
+              className="flex flex-col items-center justify-center gap-0.5 h-11 w-11 rounded-full sm:h-auto sm:w-auto sm:rounded-xl sm:px-4 sm:py-2 !bg-red-600 hover:!bg-red-700 !text-white !border-0 text-[11px] font-medium transition ml-1"
+            >
+              <LeaveIcon />
+              <span className="ctrl-label">Leave</span>
+            </DisconnectButton>
+          </div>
+        </footer>
+      </div>
+    </HandsContext.Provider>
   );
-}
-
-/* =====================  Local recording  ===================== */
-
-// Records what the user sees/hears in the call tab (via getDisplayMedia) and
-// mixes in their microphone, then downloads a .webm — no server involved.
-function useLocalRecorder(room: string) {
-  const [recording, setRecording] = useState(false);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const streamsRef = useRef<MediaStream[]>([]);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-
-  const cleanup = useCallback(() => {
-    // If a recording is still live (e.g. the user hit Leave mid-recording),
-    // stop it and bail out — onstop flushes the chunks, downloads the file and
-    // calls cleanup() again. Tearing the tracks down first would lose the file.
-    const rec = recorderRef.current;
-    if (rec && rec.state !== "inactive") {
-      try {
-        rec.stop();
-      } catch {
-        /* already torn down */
-      }
-      return;
-    }
-    recorderRef.current = null;
-    chunksRef.current = []; // don't hold a long capture in memory
-    streamsRef.current.forEach((s) => s.getTracks().forEach((t) => t.stop()));
-    streamsRef.current = [];
-    audioCtxRef.current?.close().catch(() => {});
-    audioCtxRef.current = null;
-  }, []);
-
-  const start = useCallback(async () => {
-    // Guard double-clicks: two recorders pushing into one chunk array produces
-    // a corrupt, interleaved file.
-    if (recorderRef.current) return;
-    try {
-      const display = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: 30 },
-        audio: true,
-      });
-      streamsRef.current.push(display);
-
-      // Mix the local mic in with the tab audio, when the mic is allowed.
-      let audioTracks = display.getAudioTracks();
-      try {
-        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-        streamsRef.current.push(mic);
-        const ctx = new AudioContext();
-        audioCtxRef.current = ctx;
-        const dest = ctx.createMediaStreamDestination();
-        if (display.getAudioTracks().length) {
-          ctx.createMediaStreamSource(display).connect(dest);
-        }
-        ctx.createMediaStreamSource(mic).connect(dest);
-        audioTracks = dest.stream.getAudioTracks();
-      } catch {
-        /* mic denied — keep tab audio only */
-      }
-
-      const combined = new MediaStream([
-        ...display.getVideoTracks(),
-        ...audioTracks,
-      ]);
-
-      const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
-        ? "video/webm;codecs=vp9,opus"
-        : "video/webm";
-      const rec = new MediaRecorder(combined, { mimeType: mime });
-      chunksRef.current = [];
-      rec.ondataavailable = (e) => {
-        if (e.data.size) chunksRef.current.push(e.data);
-      };
-      rec.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "video/webm" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        const stamp = new Date()
-          .toISOString()
-          .slice(0, 19)
-          .replace(/[:T]/g, "-");
-        a.href = url;
-        a.download = `meeting-${room}-${stamp}.webm`;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 10_000);
-        cleanup();
-        setRecording(false);
-      };
-      // If the user stops the capture via the browser bar, finish up.
-      display.getVideoTracks()[0]?.addEventListener("ended", () => {
-        if (rec.state !== "inactive") rec.stop();
-      });
-      rec.start(1000);
-      recorderRef.current = rec;
-      setRecording(true);
-    } catch {
-      cleanup();
-      // user cancelled the picker / denied permission — no-op
-    }
-  }, [room, cleanup]);
-
-  const stop = useCallback(() => {
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop();
-    }
-  }, []);
-
-  useEffect(() => () => cleanup(), [cleanup]);
-  return { recording, start, stop };
 }
 
 /* =====================  Responsive helper  ===================== */
@@ -762,9 +689,44 @@ function useIsMobile() {
 /* =====================  Stage layouts  ===================== */
 
 /**
- * Teams-style phone layout: the active speaker fills the screen, your own
- * camera sits in a small floating PiP, and any other participants run along a
- * compact strip at the top.
+ * Phone default: a full-bleed grid of equal tiles, edge to edge — 2 people
+ * stack vertically, 3+ go two across, an odd last tile spans the full width.
+ * Matches the WhatsApp / Teams mobile group-call look.
+ */
+function MobileGrid({
+  tiles,
+  onSpotlight,
+}: {
+  tiles: TrackReferenceOrPlaceholder[];
+  onSpotlight: (identity: string) => void;
+}) {
+  const n = tiles.length;
+  const cols = n <= 2 ? "grid-cols-1" : "grid-cols-2";
+  return (
+    <div className={`grid ${cols} auto-rows-fr gap-[2px] h-full w-full bg-black`}>
+      {tiles.map((t, i) => (
+        <div
+          key={t.participant.identity}
+          className={`h-full min-h-0 ${
+            n > 2 && n % 2 === 1 && i === n - 1 ? "col-span-2" : ""
+          }`}
+        >
+          <Tile
+            trackRef={t}
+            fill
+            flush
+            onSpotlight={() => onSpotlight(t.participant.identity)}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Teams-style spotlight layout on phones: the spotlighted person fills the
+ * screen, your own camera sits in a small floating PiP, and any other
+ * participants run along a compact strip at the top.
  */
 function MobileStage({
   main,
@@ -900,22 +862,127 @@ function SpotlightLayout({
 function ShareLayout({
   screenShares,
   cameraTiles,
+  control,
+  nameOf,
 }: {
   screenShares: TrackReferenceOrPlaceholder[];
   cameraTiles: TrackReferenceOrPlaceholder[];
+  control: UseShareControl;
+  nameOf: (identity: string) => string;
 }) {
   const main = screenShares[0];
+  const stageRef = useRef<HTMLDivElement>(null);
+  // The letterboxed video box inside the stage, in stage-relative pixels.
+  const [box, setBox] = useState({ left: 0, top: 0, width: 0, height: 0 });
+
+  // Pointer positions are normalised against the *video*, not the container.
+  // The share is drawn with object-contain, so the black bars differ for every
+  // viewer — normalising against the container would put the shared pointer in
+  // a different place on every screen.
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const measure = () => {
+      const rect = stage.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const video = stage.querySelector("video");
+      const vw = video?.videoWidth || 16;
+      const vh = video?.videoHeight || 9;
+      const scale = Math.min(rect.width / vw, rect.height / vh);
+      const width = vw * scale;
+      const height = vh * scale;
+      setBox({
+        left: (rect.width - width) / 2,
+        top: (rect.height - height) / 2,
+        width,
+        height,
+      });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(stage);
+    const video = stage.querySelector("video");
+    // The intrinsic size is unknown until the first frame lands, and changes
+    // if the presenter switches window.
+    video?.addEventListener("loadedmetadata", measure);
+    video?.addEventListener("resize", measure);
+    const late = setTimeout(measure, 1500);
+    return () => {
+      ro.disconnect();
+      video?.removeEventListener("loadedmetadata", measure);
+      video?.removeEventListener("resize", measure);
+      clearTimeout(late);
+    };
+  }, []);
+
+  /** Stage-relative pointer position → 0..1 inside the video, or null. */
+  const toVideoCoords = (e: React.PointerEvent) => {
+    if (!box.width || !box.height) return null;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left - box.left) / box.width;
+    const y = (e.clientY - rect.top - box.top) / box.height;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+    return { x, y };
+  };
+
+  const presenterName =
+    main.participant.name || main.participant.identity;
+  const pointer = control.pointer;
+
   return (
     <div className="flex flex-col lg:flex-row gap-3 h-full">
-      <div className="flex-1 min-h-0 rounded-xl overflow-hidden bg-black flex items-center justify-center relative">
+      <div
+        ref={stageRef}
+        onPointerMove={(e) => {
+          if (!control.amController) return;
+          const c = toVideoCoords(e);
+          if (c) control.moveCursor(c.x, c.y);
+        }}
+        onPointerDown={(e) => {
+          if (!control.amController) return;
+          const c = toVideoCoords(e);
+          if (c) control.clickAt(c.x, c.y);
+        }}
+        className={`flex-1 min-h-0 rounded-xl overflow-hidden bg-black flex items-center justify-center relative ${
+          control.amController ? "cursor-crosshair" : ""
+        }`}
+      >
         <VideoTrack
           trackRef={main as TrackReference}
           className="w-full h-full object-contain"
         />
+
+        {/* The shared pointer of whoever holds control. */}
+        {pointer && box.width > 0 && (
+          <SharedPointer
+            left={box.left + pointer.x * box.width}
+            top={box.top + pointer.y * box.height}
+            name={nameOf(pointer.identity)}
+          />
+        )}
+        {box.width > 0 &&
+          control.pings.map((p) => (
+            <span
+              key={p.id}
+              className="pointer-events-none absolute w-10 h-10 -ml-5 -mt-5 rounded-full border-2 border-teams-purple control-ping"
+              style={{
+                left: box.left + p.x * box.width,
+                top: box.top + p.y * box.height,
+              }}
+            />
+          ))}
+
         <span className="absolute bottom-2 left-3 text-xs bg-black/60 px-2 py-1 rounded-md">
-          {(main.participant.name || main.participant.identity) +
-            " is presenting"}
+          {presenterName} is presenting
         </span>
+        {control.controller && (
+          <span className="absolute top-2 left-3 flex items-center gap-1.5 text-xs font-medium bg-teams-purple/90 px-2 py-1 rounded-md">
+            <CursorIcon />
+            {control.amController
+              ? "You have control"
+              : `${nameOf(control.controller)} has control`}
+          </span>
+        )}
       </div>
       <div className="flex lg:flex-col gap-2 lg:w-52 shrink-0 overflow-auto">
         {cameraTiles.map((t) => (
@@ -928,12 +995,139 @@ function ShareLayout({
   );
 }
 
+/** The labelled cursor of whoever currently holds control. */
+function SharedPointer({
+  left,
+  top,
+  name,
+}: {
+  left: number;
+  top: number;
+  name: string;
+}) {
+  return (
+    <div
+      className="pointer-events-none absolute z-20 transition-[left,top] duration-75 ease-linear"
+      style={{ left, top }}
+    >
+      <svg width="22" height="22" viewBox="0 0 24 24" className="drop-shadow">
+        <path
+          d="M5 2l14 8.5-6.2 1.2L9.6 19 5 2Z"
+          fill="#fff"
+          stroke="#5b5fc7"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span className="absolute left-5 top-4 whitespace-nowrap text-[11px] font-medium bg-teams-purple text-white px-1.5 py-0.5 rounded">
+        {name}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Toolbar button for the control handshake. Note that "control" here is a
+ * shared pointer over the presentation, not remote input — a browser tab can't
+ * drive someone else's mouse.
+ */
+function ControlButton({ control }: { control: UseShareControl }) {
+  if (control.amPresenter) {
+    if (!control.controller) return null;
+    return (
+      <button
+        onClick={control.revokeControl}
+        title="Take control back from the current controller"
+        className={ctrlBtn(true)}
+      >
+        <CursorIcon />
+        <span className="ctrl-label">Take back</span>
+      </button>
+    );
+  }
+
+  if (control.amController) {
+    return (
+      <button
+        onClick={control.releaseControl}
+        title="Give control back to the presenter"
+        className={ctrlBtn(true)}
+      >
+        <CursorIcon />
+        <span className="ctrl-label">Release</span>
+      </button>
+    );
+  }
+
+  return (
+    <button
+      onClick={control.requestControl}
+      disabled={control.requestPending}
+      title="Ask the presenter for control — you get a shared pointer on their screen"
+      className={ctrlBtn(false) + " disabled:opacity-50"}
+    >
+      <CursorIcon />
+      <span className="ctrl-label">
+        {control.requestPending ? "Asked…" : "Control"}
+      </span>
+    </button>
+  );
+}
+
+/** Presenter-side prompt: "N wants control" → Allow / Deny. */
+function ControlRequests({
+  requests,
+  nameOf,
+  onAllow,
+  onDeny,
+}: {
+  requests: string[];
+  nameOf: (identity: string) => string;
+  onAllow: (identity: string) => void;
+  onDeny: (identity: string) => void;
+}) {
+  return (
+    <div className="fixed bottom-32 sm:bottom-24 right-3 sm:right-4 z-40 w-80 max-w-[92vw] bg-teams-stage border border-white/15 rounded-xl shadow-2xl overflow-hidden">
+      <div className="px-4 py-2.5 bg-teams-purple/20 border-b border-white/10 text-sm font-semibold">
+        Requests to control your screen
+      </div>
+      <div className="divide-y divide-white/5">
+        {requests.map((identity) => (
+          <div key={identity} className="flex items-center gap-2 px-3 py-2">
+            <Avatar name={nameOf(identity)} size={32} />
+            <div className="flex-1 min-w-0 text-sm truncate">
+              {nameOf(identity)}
+            </div>
+            <button
+              onClick={() => onAllow(identity)}
+              className="text-xs font-medium bg-teams-purple hover:bg-teams-purpleDark text-white rounded-md px-2.5 py-1.5"
+            >
+              Allow
+            </button>
+            <button
+              onClick={() => onDeny(identity)}
+              className="text-xs font-medium bg-white/10 hover:bg-white/20 text-white rounded-md px-2.5 py-1.5"
+            >
+              Deny
+            </button>
+          </div>
+        ))}
+      </div>
+      <p className="px-3 py-2 text-[11px] text-gray-400 border-t border-white/10">
+        They get a shared pointer you can see — your mouse and keyboard stay
+        yours.
+      </p>
+    </div>
+  );
+}
+
 /* =====================  Participant tile  ===================== */
 
 function Tile({
   trackRef,
   compact,
   fill,
+  flush,
   spotlighted,
   onSpotlight,
 }: {
@@ -941,6 +1135,8 @@ function Tile({
   compact?: boolean;
   /** Fill the grid cell (mobile stage) instead of forcing a 16:9 box. */
   fill?: boolean;
+  /** Edge-to-edge phone grid: square corners, badge-style mute indicator. */
+  flush?: boolean;
   spotlighted?: boolean;
   onSpotlight?: () => void;
 }) {
@@ -953,13 +1149,23 @@ function Tile({
   });
   const hasVideo = !!trackRef.publication && !camMuted;
   const name = p.name || p.identity;
+  const allHands = useContext(HandsContext);
+  const raisedAt = allHands[p.identity];
+  // Teams numbers the queue by who raised first.
+  const handPlace = raisedAt
+    ? Object.values(allHands).filter((t) => t <= raisedAt).length
+    : 0;
 
   return (
     <div
-      className={`group tile-fill relative rounded-xl overflow-hidden bg-teams-stage w-full ring-2 transition-all ${
+      className={`group tile-fill relative overflow-hidden bg-teams-stage w-full ring-2 transition-all ${
         // `fill` tiles take exactly their grid cell (min-h-0 lets them shrink
         // instead of forcing the grid taller than the stage).
         fill ? "h-full min-h-0" : "aspect-video h-full"
+      } ${
+        // Flush tiles keep the speaking indicator inside their box so the
+        // edge-to-edge grid stays perfectly seamless.
+        flush ? "rounded-none ring-inset" : "rounded-xl"
       } ${
         spotlighted
           ? "ring-teams-purple"
@@ -968,11 +1174,36 @@ function Tile({
           : "ring-transparent"
       }`}
     >
+      {/* Teams-mobile-style mute badge in the top corner of flush tiles. */}
+      {flush && micMuted && (
+        <span
+          title={`${name} is muted`}
+          className="absolute top-2 left-2 z-10 w-9 h-9 rounded-full bg-black/35 backdrop-blur-sm flex items-center justify-center text-white"
+        >
+          <MicOffIcon />
+        </span>
+      )}
+      {raisedAt > 0 && (
+        <span
+          title={`${name} raised their hand`}
+          className={`absolute top-2 z-10 flex items-center gap-1 bg-amber-400 text-black text-xs font-semibold rounded-md px-1.5 py-1 hand-bounce ${
+            // The mute badge owns the top-left corner on flush tiles.
+            flush ? "right-2" : "left-2"
+          }`}
+        >
+          <HandIcon raised small />
+          {handPlace}
+        </span>
+      )}
       {onSpotlight && (
         <button
-          onClick={onSpotlight}
+          onClick={(e) => {
+            // Don't let the tap fall through to the stage's chrome toggle.
+            e.stopPropagation();
+            onSpotlight();
+          }}
           title={spotlighted ? "Stop spotlight" : "Spotlight for everyone"}
-          className={`absolute top-2 right-2 z-10 rounded-md p-1.5 text-white transition-opacity ${
+          className={`spot-reveal absolute top-2 right-2 z-10 rounded-md p-1.5 text-white transition-opacity ${
             spotlighted
               ? "bg-teams-purple"
               : "bg-black/50 hover:bg-black/70 opacity-0 group-hover:opacity-100 focus:opacity-100"
@@ -1106,19 +1337,84 @@ function ChatPanel({
 function PeoplePanel({
   participants,
   onClose,
+  roles,
+  hands,
+  control,
+  onError,
 }: {
   participants: Participant[];
   onClose: () => void;
+  roles: MeetingRoles;
+  hands: UseRaiseHand;
+  control: UseShareControl;
+  onError: (text: string) => void;
 }) {
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+
+  // Raised hands float to the top, in the order they went up — the panel
+  // doubles as the speaking queue.
+  const ordered = useMemo(() => {
+    const place = (identity: string) => hands.order.indexOf(identity);
+    return [...participants].sort((a, b) => {
+      const pa = place(a.identity);
+      const pb = place(b.identity);
+      if (pa !== pb) return (pa < 0 ? Infinity : pa) - (pb < 0 ? Infinity : pb);
+      return 0;
+    });
+  }, [participants, hands.order]);
+
+  const run = async (action: Parameters<MeetingRoles["runAction"]>[0], identity?: string) => {
+    setMenuFor(null);
+    const err = await roles.runAction(action, identity);
+    if (err) onError(err);
+  };
+
   return (
-    <PanelShell title={`People (${participants.length})`} onClose={onClose}>
+    <PanelShell
+      title={`People (${participants.length})`}
+      onClose={onClose}
+      actions={
+        roles.canManage ? (
+          <div className="flex items-center gap-2">
+            {hands.order.length > 0 && (
+              <button
+                onClick={hands.lowerAllHands}
+                className="text-xs font-medium text-amber-300 hover:underline"
+              >
+                Lower all
+              </button>
+            )}
+            <button
+              onClick={() => run("muteAll")}
+              disabled={roles.busy}
+              className="text-xs font-medium text-teams-purple hover:underline disabled:opacity-50"
+            >
+              Mute all
+            </button>
+          </div>
+        ) : null
+      }
+    >
       <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
-        {participants.map((p) => {
+        {ordered.map((p) => {
           const name = p.name || p.identity;
+          const isOwnerRow = p.identity === roles.ownerIdentity;
+          const isCoHostRow = roles.coHostIdentities.includes(p.identity);
+          const handPlace = hands.order.indexOf(p.identity);
+          // Co-hosts run the meeting but don't outrank each other or the owner.
+          const canActOn =
+            roles.canManage &&
+            !p.isLocal &&
+            (roles.isOwner || (!isOwnerRow && !isCoHostRow));
+          const canLowerHand =
+            handPlace >= 0 && (roles.canManage || p.isLocal);
+          const canGiveControl = control.amPresenter && !p.isLocal;
+          const showMenu = canActOn || canLowerHand || canGiveControl;
+
           return (
             <div
               key={p.identity}
-              className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5"
+              className="relative flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5"
             >
               <Avatar name={name} size={36} />
               <div className="flex-1 min-w-0">
@@ -1126,16 +1422,141 @@ function PeoplePanel({
                   {name}
                   {p.isLocal ? " (You)" : ""}
                 </div>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  {isOwnerRow && <RoleTag label="Host" />}
+                  {isCoHostRow && <RoleTag label="Co-host" />}
+                  {control.controller === p.identity && (
+                    <RoleTag label="In control" />
+                  )}
+                </div>
               </div>
+              {handPlace >= 0 && (
+                <span className="flex items-center gap-1 bg-amber-400 text-black text-[11px] font-semibold rounded-md px-1.5 py-0.5">
+                  <HandIcon raised small />
+                  {handPlace + 1}
+                </span>
+              )}
               <div className="flex items-center gap-1.5 text-gray-300">
                 {p.isMicrophoneEnabled ? <MicMini /> : <MicOffMini />}
                 {p.isCameraEnabled ? <CamMini /> : <CamOffMini />}
               </div>
+
+              {showMenu && (
+                <button
+                  onClick={() =>
+                    setMenuFor((cur) => (cur === p.identity ? null : p.identity))
+                  }
+                  aria-label={`More options for ${name}`}
+                  title="More options"
+                  className="w-7 h-7 shrink-0 flex items-center justify-center rounded hover:bg-white/10 text-gray-300"
+                >
+                  <MoreIcon />
+                </button>
+              )}
+
+              {menuFor === p.identity && (
+                <>
+                  {/* Click-away catcher, behind the menu. */}
+                  <button
+                    aria-label="Close menu"
+                    onClick={() => setMenuFor(null)}
+                    className="fixed inset-0 z-20 cursor-default"
+                  />
+                  <div className="absolute right-2 top-11 z-30 w-52 bg-teams-stage border border-white/15 rounded-lg shadow-2xl py-1 text-sm">
+                    {canLowerHand && (
+                      <MenuItem
+                        onClick={() => {
+                          hands.lowerHandFor(p.identity);
+                          setMenuFor(null);
+                        }}
+                      >
+                        Lower hand
+                      </MenuItem>
+                    )}
+                    {canGiveControl &&
+                      (control.controller === p.identity ? (
+                        <MenuItem
+                          onClick={() => {
+                            control.revokeControl();
+                            setMenuFor(null);
+                          }}
+                        >
+                          Take control back
+                        </MenuItem>
+                      ) : (
+                        <MenuItem
+                          onClick={() => {
+                            control.grantControl(p.identity);
+                            setMenuFor(null);
+                          }}
+                        >
+                          Give control
+                        </MenuItem>
+                      ))}
+                    {canActOn && (
+                      <>
+                        <MenuItem onClick={() => run("mute", p.identity)}>
+                          Mute
+                        </MenuItem>
+                        <MenuItem onClick={() => run("stopVideo", p.identity)}>
+                          Turn off camera
+                        </MenuItem>
+                      </>
+                    )}
+                    {roles.isOwner && !p.isLocal && !isOwnerRow && (
+                      <MenuItem
+                        onClick={() =>
+                          run(isCoHostRow ? "demote" : "promote", p.identity)
+                        }
+                      >
+                        {isCoHostRow ? "Remove co-host" : "Make co-host"}
+                      </MenuItem>
+                    )}
+                    {canActOn && !isOwnerRow && (
+                      <MenuItem
+                        danger
+                        onClick={() => run("remove", p.identity)}
+                      >
+                        Remove from meeting
+                      </MenuItem>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           );
         })}
       </div>
     </PanelShell>
+  );
+}
+
+function RoleTag({ label }: { label: string }) {
+  return (
+    <span className="text-[10px] uppercase tracking-wide font-semibold text-teams-purple bg-teams-purple/15 border border-teams-purple/30 rounded px-1.5 py-0.5">
+      {label}
+    </span>
+  );
+}
+
+function MenuItem({
+  children,
+  onClick,
+  danger,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left px-3 py-2 hover:bg-white/10 ${
+        danger ? "text-red-300" : "text-white"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -1195,16 +1616,20 @@ function LobbyBanner({
 function PanelShell({
   title,
   onClose,
+  actions,
   children,
 }: {
   title: string;
   onClose: () => void;
+  /** Optional header controls, e.g. "Mute all". */
+  actions?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col h-full">
-      <div className="h-14 shrink-0 flex items-center justify-between px-4 border-b border-white/10">
-        <h2 className="font-semibold text-sm">{title}</h2>
+      <div className="h-14 shrink-0 flex items-center justify-between gap-2 px-4 border-b border-white/10">
+        <h2 className="font-semibold text-sm shrink-0">{title}</h2>
+        {actions && <div className="ml-auto">{actions}</div>}
         <button
           onClick={onClose}
           className="text-gray-400 hover:text-white w-7 h-7 flex items-center justify-center rounded hover:bg-white/10"
@@ -1381,10 +1806,10 @@ const ShareIcon = () => (
     <path d="M8 21h8M12 17v4M9 11l3-3 3 3" />
   </svg>
 );
-const BlurIcon = () => (
+const EffectsIcon = () => (
   <svg {...I({})}>
-    <circle cx="12" cy="12" r="9" />
-    <path d="M12 3v18M3.5 8.5h17M2.8 15.5h18.4M5 5.6h14M5 18.4h14" opacity="0.5" />
+    <path d="M12 3l1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7L12 3Z" />
+    <path d="M19 14l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9L19 14ZM5 15l.8 1.7L7.5 17.5l-1.7.8L5 20l-.8-1.7L2.5 17.5l1.7-.8L5 15Z" />
   </svg>
 );
 const SpotlightIcon = ({ active }: { active?: boolean }) => (
@@ -1392,18 +1817,37 @@ const SpotlightIcon = ({ active }: { active?: boolean }) => (
     <path d="M12 2l2.9 6.26L21 9.27l-4.5 4.38L17.8 21 12 17.27 6.2 21l1.3-7.35L3 9.27l6.1-1.01L12 2Z" />
   </svg>
 );
-const SaveRecIcon = ({ active }: { active?: boolean }) =>
-  active ? (
-    <svg {...I({})}>
-      <circle cx="12" cy="12" r="9" />
-      <rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor" />
-    </svg>
-  ) : (
-    <svg {...I({})}>
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <path d="M7 10l5 5 5-5M12 15V3" />
+const HandIcon = ({
+  raised,
+  small,
+}: {
+  raised?: boolean;
+  small?: boolean;
+}) => {
+  const size = small ? 13 : 20;
+  return (
+    <svg {...I({ width: size, height: size })}>
+      <path
+        d="M9 11V4.5a1.5 1.5 0 0 1 3 0V11m0-.5V3.5a1.5 1.5 0 0 1 3 0V11m0-.5V5.5a1.5 1.5 0 0 1 3 0V13"
+        fill={raised ? "currentColor" : "none"}
+        fillOpacity={raised ? 0.18 : 0}
+      />
+      <path d="M9 11V8.5a1.5 1.5 0 0 0-3 0V15a6 6 0 0 0 6 6h1.5a5.5 5.5 0 0 0 5.5-5.5V13" />
     </svg>
   );
+};
+const CursorIcon = () => (
+  <svg {...I({ width: 18, height: 18 })}>
+    <path d="M5 2l14 8.5-6.2 1.2L9.6 19 5 2Z" />
+  </svg>
+);
+const MoreIcon = () => (
+  <svg {...I({ width: 16, height: 16 })}>
+    <circle cx="5" cy="12" r="1.4" fill="currentColor" />
+    <circle cx="12" cy="12" r="1.4" fill="currentColor" />
+    <circle cx="19" cy="12" r="1.4" fill="currentColor" />
+  </svg>
+);
 const ChatIcon = () => (
   <svg {...I({})}>
     <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5Z" />

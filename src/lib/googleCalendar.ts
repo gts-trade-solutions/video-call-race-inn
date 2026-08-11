@@ -226,9 +226,13 @@ export async function disconnect(userId: number): Promise<void> {
 
 export async function createCalendarEvent(
   accessToken: string,
-  ev: CalendarEvent
+  ev: CalendarEvent,
+  /** Invitee emails — added as attendees so the event lands on *their*
+   *  calendars too, and Google emails them the invite. */
+  attendees: string[] = []
 ): Promise<{ id: string; htmlLink: string } | null> {
-  const res = await fetch(`${EVENTS_URL}?sendUpdates=none`, {
+  const sendUpdates = attendees.length > 0 ? "all" : "none";
+  const res = await fetch(`${EVENTS_URL}?sendUpdates=${sendUpdates}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -240,6 +244,9 @@ export async function createCalendarEvent(
       location: ev.location,
       start: { dateTime: ev.start.toISOString() },
       end: { dateTime: ev.end.toISOString() },
+      ...(attendees.length > 0
+        ? { attendees: attendees.map((email) => ({ email })) }
+        : {}),
       reminders: { useDefault: true },
     }),
   });

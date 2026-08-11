@@ -72,6 +72,57 @@ body {
   animation: reaction-rise 3s ease-out forwards;
 }
 
+/* Raised-hand badge: a short wave, then it settles so it can't distract for
+   the rest of the meeting. */
+@keyframes hand-wave {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-12deg);
+  }
+  75% {
+    transform: rotate(12deg);
+  }
+}
+.hand-bounce {
+  animation: hand-wave 0.6s ease-in-out 3;
+  transform-origin: bottom center;
+}
+
+/* Touch screens have no hover, so the tile's spotlight star (hidden until
+   hover on desktop) must always be visible there. */
+@media (hover: none) {
+  .spot-reveal {
+    opacity: 1;
+  }
+}
+
+/* Click ripple from whoever holds control of a shared screen. */
+@keyframes control-ping-out {
+  0% {
+    transform: scale(0.3);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+.control-ping {
+  animation: control-ping-out 1.2s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hand-bounce,
+  .control-ping,
+  .reaction-float {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+  }
+}
+
 /* Make the LiveKit <video> fill our custom tiles */
 .lk-participant-media-video {
   width: 100%;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { AccessToken } from "livekit-server-sdk";
 import { ensureSchema, getPool } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { getMeetingRole, identityFor } from "@/lib/meetingRoles";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
 export const dynamic = "force-dynamic";
@@ -70,11 +71,28 @@ export async function GET(req: Request) {
       lobbyEnabled = !!found[0].lobby_enabled;
     }
 
-    const isHost = hostId === user.id;
+    // Co-hosts share the host's privileges (skip the lobby, record, manage
+    // people), so resolve the full role rather than just comparing host_id.
+    const role = await getMeetingRole(room, user.id);
+    const isOwner = hostId === user.id;
+    const canManage = role?.canManage ?? isOwner;
+    const ownerIdentity = role?.ownerIdentity ?? identityFor(hostId);
+    const coHostIdentities = role?.coHostIdentities ?? [];
+
+    // People the host explicitly invited skip the lobby, like Teams invitees.
+    const [inv] = await pool.query<RowDataPacket[]>(
+      `SELECT 1 FROM meeting_invites
+        WHERE meeting_id = :meetingId
+          AND (user_id = :userId OR email = :email)
+        LIMIT 1`,
+      { meetingId, userId: user.id, email: user.email.toLowerCase() }
+    );
+    const isInvited = inv.length > 0;
 
     // ----- Waiting room -----
-    // The host always gets in. Others need to be admitted when the lobby is on.
-    if (!isHost && lobbyEnabled) {
+    // Hosts, co-hosts and invitees always get in. Others need to be admitted
+    // when the lobby is on.
+    if (!canManage && !isInvited && lobbyEnabled) {
       // Create a waiting request the first time; leave an existing decision be.
       await pool.query<ResultSetHeader>(
         `INSERT INTO lobby_admissions (meeting_id, user_id, status)
@@ -112,8 +130,9 @@ export async function GET(req: Request) {
     );
 
     // Identity must be unique per participant; name is what others see.
+    const identity = identityFor(user.id);
     const at = new AccessToken(apiKey, apiSecret, {
-      identity: `user-${user.id}`,
+      identity,
       name: user.name,
       ttl: "2h",
     });
@@ -129,7 +148,12 @@ export async function GET(req: Request) {
     return NextResponse.json({
       token,
       url: process.env.NEXT_PUBLIC_LIVEKIT_URL || process.env.LIVEKIT_URL,
-      isHost,
+      // `isHost` keeps its original meaning for the UI: "may run this meeting".
+      isHost: canManage,
+      isOwner,
+      identity,
+      ownerIdentity,
+      coHostIdentities,
     });
   } catch (err) {
     console.error("livekit token error:", err);

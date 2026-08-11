@@ -34,6 +34,9 @@ export default function MeetingRoom({
   const [token, setToken] = useState<string>("");
   const [serverUrl, setServerUrl] = useState<string>("");
   const [isHost, setIsHost] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [ownerIdentity, setOwnerIdentity] = useState("");
+  const [coHostIdentities, setCoHostIdentities] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -78,7 +81,12 @@ export default function MeetingRoom({
     waiting?: boolean;
     token?: string;
     url?: string;
+    /** May run the meeting: the owner or a co-host. */
     isHost?: boolean;
+    /** Created the meeting — only they can promote co-hosts. */
+    isOwner?: boolean;
+    ownerIdentity?: string;
+    coHostIdentities?: string[];
   };
 
   const requestToken = useCallback(async (): Promise<{
@@ -110,6 +118,9 @@ export default function MeetingRoom({
       setToken(data.token);
       setServerUrl(data.url);
       setIsHost(!!data.isHost);
+      setIsOwner(!!data.isOwner);
+      setOwnerIdentity(data.ownerIdentity ?? "");
+      setCoHostIdentities(data.coHostIdentities ?? []);
       return "in-call";
     },
     []
@@ -303,7 +314,13 @@ export default function MeetingRoom({
         }}
         style={{ height: "100%" }}
       >
-        <TeamsCall room={room} isHost={isHost} />
+        <TeamsCall
+          room={room}
+          isHost={isHost}
+          isOwner={isOwner}
+          ownerIdentity={ownerIdentity}
+          coHostIdentities={coHostIdentities}
+        />
       </LiveKitRoom>
     </div>
   );

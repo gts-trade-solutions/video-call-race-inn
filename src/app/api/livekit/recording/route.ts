@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { EgressInfo } from "livekit-server-sdk";
 import { getSession } from "@/lib/auth";
 import { ensureSchema, getPool } from "@/lib/db";
+import { getMeetingRole } from "@/lib/meetingRoles";
 import type { RowDataPacket } from "mysql2";
 import {
   buildFileOutput,
@@ -35,29 +36,10 @@ type Row = RowDataPacket & {
 };
 
 /**
- * Resolves a meeting and the caller's relationship to it. Recording is
- * sensitive (it writes billable egress into our S3 bucket and captures the
- * room), so it must never be driven by a stranger who merely knows a room id.
+ * Recording is sensitive (it writes billable egress into our S3 bucket and
+ * captures the room), so it must never be driven by a stranger who merely knows
+ * a room id — see @/lib/meetingRoles for who counts as a host.
  */
-async function meetingAuth(room: string, userId: number) {
-  const pool = getPool();
-  const [rows] = await pool.query<RowDataPacket[]>(
-    "SELECT id, host_id FROM meetings WHERE room_id = :room LIMIT 1",
-    { room }
-  );
-  if (rows.length === 0) return null;
-  const meetingId = rows[0].id as number;
-  const isHost = (rows[0].host_id as number) === userId;
-  let isParticipant = isHost;
-  if (!isParticipant) {
-    const [p] = await pool.query<RowDataPacket[]>(
-      "SELECT 1 FROM meeting_participants WHERE meeting_id = :meetingId AND user_id = :userId LIMIT 1",
-      { meetingId, userId }
-    );
-    isParticipant = p.length > 0;
-  }
-  return { meetingId, isHost, isParticipant };
-}
 
 /**
  * GET /api/livekit/recording?room=ID
@@ -75,7 +57,7 @@ export async function GET(req: Request) {
   }
 
   await ensureSchema();
-  const auth = await meetingAuth(room, user.id);
+  const auth = await getMeetingRole(room, user.id);
   if (!auth || !auth.isParticipant) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -128,14 +110,14 @@ export async function POST(req: Request) {
 
   await ensureSchema();
 
-  // Only the meeting host may start or stop a recording.
-  const auth = await meetingAuth(room, user.id);
+  // Only the meeting host (or a co-host) may start or stop a recording.
+  const auth = await getMeetingRole(room, user.id);
   if (!auth) {
     return NextResponse.json({ error: "Meeting not found" }, { status: 404 });
   }
-  if (!auth.isHost) {
+  if (!auth.canManage) {
     return NextResponse.json(
-      { error: "Only the host can start or stop recording." },
+      { error: "Only the host or a co-host can start or stop recording." },
       { status: 403 }
     );
   }

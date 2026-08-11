@@ -1,22 +1,10 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { ensureSchema, getPool } from "@/lib/db";
+import { getMeetingRole } from "@/lib/meetingRoles";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
 export const dynamic = "force-dynamic";
-
-async function meetingForHost(room: string, userId: number) {
-  const pool = getPool();
-  const [rows] = await pool.query<RowDataPacket[]>(
-    "SELECT id, host_id FROM meetings WHERE room_id = :room LIMIT 1",
-    { room }
-  );
-  if (rows.length === 0) return null;
-  return {
-    meetingId: rows[0].id as number,
-    isHost: (rows[0].host_id as number) === userId,
-  };
-}
 
 // GET /api/livekit/lobby?room=ID — host sees who is waiting to be admitted.
 export async function GET(req: Request) {
@@ -30,9 +18,9 @@ export async function GET(req: Request) {
   }
 
   await ensureSchema();
-  const m = await meetingForHost(room, user.id);
-  if (!m || !m.isHost) {
-    // Non-hosts (or unknown room) simply get nothing to act on.
+  const m = await getMeetingRole(room, user.id);
+  if (!m || !m.canManage) {
+    // Attendees (or an unknown room) simply get nothing to act on.
     return NextResponse.json({ host: false, waiting: [] });
   }
 
@@ -71,13 +59,13 @@ export async function POST(req: Request) {
   }
 
   await ensureSchema();
-  const m = await meetingForHost(room, user.id);
+  const m = await getMeetingRole(room, user.id);
   if (!m) {
     return NextResponse.json({ error: "Meeting not found" }, { status: 404 });
   }
-  if (!m.isHost) {
+  if (!m.canManage) {
     return NextResponse.json(
-      { error: "Only the host can admit or deny people." },
+      { error: "Only the host or a co-host can admit or deny people." },
       { status: 403 }
     );
   }

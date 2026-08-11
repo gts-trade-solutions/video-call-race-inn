@@ -114,6 +114,25 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
         new Date(a.scheduledAt!).getTime() - new Date(b.scheduledAt!).getTime()
     );
 
+  // "Meet now": create the meeting and go straight into the call — the invite
+  // link is one tap away inside the room (Copy link in the header).
+  async function meetNow() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/meetings", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Could not start the call.");
+        return;
+      }
+      router.push(`/meeting/${data.roomId}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Create a shareable link without joining (the old primary action).
   async function createLink() {
     setLoading(true);
     setError(null);
@@ -176,12 +195,12 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
         {/* Three action buttons */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <button
-            onClick={createLink}
+            onClick={meetNow}
             disabled={loading}
             className="bg-teams-purple hover:bg-teams-purpleDark disabled:opacity-60 text-white rounded-lg px-5 py-4 flex items-center justify-center gap-3 font-semibold shadow-sm transition"
           >
-            <LinkIcon />
-            {loading ? "Creating…" : "Create a meeting link"}
+            <VideoIcon />
+            {loading ? "Starting…" : "Meet now"}
           </button>
           <button
             onClick={() => setShowSchedule(true)}
@@ -200,9 +219,16 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
         </div>
 
         {/* Meeting links */}
-        <h2 className="text-lg font-bold text-teams-dark mt-10 mb-3">
-          Meeting links
-        </h2>
+        <div className="flex items-center justify-between mt-10 mb-3">
+          <h2 className="text-lg font-bold text-teams-dark">Meeting links</h2>
+          <button
+            onClick={createLink}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 text-sm border border-teams-line hover:bg-teams-bg rounded-md px-3 py-1.5 font-medium disabled:opacity-60"
+          >
+            <LinkIcon small />+ New link
+          </button>
+        </div>
         {links.length === 0 ? (
           <div className="border border-teams-line rounded-lg p-6">
             <div className="text-3xl mb-3">🔗</div>
@@ -355,9 +381,11 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
           </div>
         )}
 
-        {/* Recordings */}
+        {/* Recording reports */}
         <div className="flex items-center justify-between mt-10 mb-3">
-          <h2 className="text-lg font-bold text-teams-dark">Recordings</h2>
+          <h2 className="text-lg font-bold text-teams-dark">
+            Recording reports
+          </h2>
           <button
             onClick={loadRecordings}
             className="text-sm text-teams-purple font-medium hover:underline"
@@ -372,38 +400,65 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
             it to S3.
           </div>
         ) : (
-          <div className="border border-teams-line rounded-lg divide-y divide-teams-line overflow-hidden">
-            {recordings.map((r) => (
-              <div
-                key={r.id}
-                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 sm:px-5 py-4 hover:bg-teams-bg/60"
-              >
-                <div className="min-w-0">
-                  <div className="font-medium text-teams-dark truncate">
-                    {r.title || `Meeting ${r.roomId}`}
-                  </div>
-                  <div className="text-xs text-teams-gray truncate">
-                    {formatWhen(r.startedAt)}
-                    {r.startedBy ? ` · by ${r.startedBy}` : ""}
-                    {r.durationSecs ? ` · ${formatDuration(r.durationSecs)}` : ""}
-                    {r.sizeBytes ? ` · ${formatSize(r.sizeBytes)}` : ""}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <RecordingStatus status={r.status} />
-                  {r.status === "completed" && r.downloadUrl ? (
-                    <a
-                      href={r.downloadUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm bg-teams-purple hover:bg-teams-purpleDark text-white rounded-md px-3 py-1.5"
-                    >
-                      Download
-                    </a>
-                  ) : null}
-                </div>
-              </div>
-            ))}
+          <div className="border border-teams-line rounded-lg overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead>
+                <tr className="bg-teams-bg text-left text-xs uppercase tracking-wide text-teams-gray">
+                  <th className="px-4 py-2.5 font-semibold">Meeting</th>
+                  <th className="px-4 py-2.5 font-semibold">Date</th>
+                  <th className="px-4 py-2.5 font-semibold">Recorded by</th>
+                  <th className="px-4 py-2.5 font-semibold">Duration</th>
+                  <th className="px-4 py-2.5 font-semibold">Size</th>
+                  <th className="px-4 py-2.5 font-semibold">Status</th>
+                  <th className="px-4 py-2.5 font-semibold text-right">
+                    Action
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-teams-line">
+                {recordings.map((r) => (
+                  <tr key={r.id} className="hover:bg-teams-bg/60">
+                    <td className="px-4 py-3 font-medium text-teams-dark max-w-[220px]">
+                      <div className="truncate">
+                        {r.title || `Meeting ${r.roomId}`}
+                      </div>
+                      <div className="text-[11px] text-teams-gray font-mono">
+                        {r.roomId}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-teams-gray whitespace-nowrap">
+                      {formatWhen(r.startedAt)}
+                    </td>
+                    <td className="px-4 py-3 text-teams-gray">
+                      {r.startedBy || "—"}
+                    </td>
+                    <td className="px-4 py-3 text-teams-gray whitespace-nowrap">
+                      {r.durationSecs ? formatDuration(r.durationSecs) : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-teams-gray whitespace-nowrap">
+                      {r.sizeBytes ? formatSize(r.sizeBytes) : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <RecordingStatus status={r.status} />
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {r.status === "completed" && r.downloadUrl ? (
+                        <a
+                          href={r.downloadUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block text-sm bg-teams-purple hover:bg-teams-purpleDark text-white rounded-md px-3 py-1.5"
+                        >
+                          Download
+                        </a>
+                      ) : (
+                        <span className="text-xs text-teams-gray">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -479,15 +534,21 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
           defaultName={user.name}
           googleConnected={google.configured && google.connected}
           onClose={() => setShowSchedule(false)}
-          onScheduled={() => {
+          onScheduled={(summary) => {
             setShowSchedule(false);
             loadMeetings();
+            if (summary) {
+              setCalMsg(summary);
+              setTimeout(() => setCalMsg(null), 6000);
+            }
           }}
         />
       )}
     </div>
   );
 }
+
+type Contact = { id: number; name: string; email: string };
 
 function ScheduleModal({
   defaultName,
@@ -498,7 +559,8 @@ function ScheduleModal({
   defaultName: string;
   googleConnected: boolean;
   onClose: () => void;
-  onScheduled: () => void;
+  /** Called on success with a human-readable summary for the dashboard. */
+  onScheduled: (summary: string | null) => void;
 }) {
   const [title, setTitle] = useState("");
   const [when, setWhen] = useState("");
@@ -506,10 +568,15 @@ function ScheduleModal({
   const [addToGoogle, setAddToGoogle] = useState(googleConnected);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [invitees, setInvitees] = useState<string[]>([]);
 
   async function save() {
     if (!when) {
       setErr("Please pick a date and time.");
+      return;
+    }
+    if (new Date(when).getTime() < Date.now() - 60_000) {
+      setErr("That time is in the past — pick a future time.");
       return;
     }
     setSaving(true);
@@ -523,14 +590,25 @@ function ScheduleModal({
           scheduledAt: new Date(when).toISOString(),
           durationMins: duration,
           addToGoogleCalendar: googleConnected && addToGoogle,
+          invitees,
         }),
       });
+      const d = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const d = await res.json();
         setErr(d.error || "Could not schedule.");
         return;
       }
-      onScheduled();
+      const bits = ["Meeting scheduled ✓"];
+      if (d.invited > 0) {
+        bits.push(
+          d.emailed > 0
+            ? `${d.emailed} of ${d.invited} invitation email${
+                d.invited === 1 ? "" : "s"
+              } sent`
+            : `${d.invited} invited (email isn't configured — share the link)`
+        );
+      }
+      onScheduled(bits.join(" · "));
     } finally {
       setSaving(false);
     }
@@ -547,6 +625,7 @@ function ScheduleModal({
           className="mt-1 w-full rounded-md border border-teams-line px-3 py-2 outline-none focus:border-teams-purple focus:ring-1 focus:ring-teams-purple"
         />
       </label>
+      <InviteePicker value={invitees} onChange={setInvitees} />
       <div className="flex gap-3">
         <label className="block flex-1">
           <span className="text-sm font-medium text-teams-dark">
@@ -604,6 +683,135 @@ function ScheduleModal({
         </button>
       </div>
     </Modal>
+  );
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Teams-style "Enter name or email": type to search your contacts or paste an
+ * email, Enter/comma to add, chips with ✕ to remove. Anything valid-looking
+ * that isn't a contact is invited by plain email.
+ */
+function InviteePicker({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (v: string[]) => void;
+}) {
+  const [text, setText] = useState("");
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [focus, setFocus] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/chat/contacts")
+      .then((r) => (r.ok ? r.json() : { contacts: [] }))
+      .then((d) =>
+        setContacts(
+          (d.contacts || []).map((c: Contact) => ({
+            id: c.id,
+            name: c.name,
+            email: c.email,
+          }))
+        )
+      )
+      .catch(() => {});
+  }, []);
+
+  const q = text.trim().toLowerCase();
+  const suggestions =
+    q.length > 0
+      ? contacts
+          .filter(
+            (c) =>
+              !value.includes(c.email.toLowerCase()) &&
+              (c.name.toLowerCase().includes(q) ||
+                c.email.toLowerCase().includes(q))
+          )
+          .slice(0, 6)
+      : [];
+
+  function add(email: string) {
+    const e = email.trim().toLowerCase();
+    if (!EMAIL_RE.test(e) || value.includes(e)) return;
+    onChange([...value, e]);
+    setText("");
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" || e.key === "," || e.key === ";") {
+      e.preventDefault();
+      // Prefer the top contact match; otherwise take the typed email.
+      if (suggestions.length > 0 && !EMAIL_RE.test(text.trim())) {
+        add(suggestions[0].email);
+      } else {
+        add(text);
+      }
+    } else if (e.key === "Backspace" && !text && value.length > 0) {
+      onChange(value.slice(0, -1));
+    }
+  }
+
+  const nameFor = (email: string) =>
+    contacts.find((c) => c.email.toLowerCase() === email)?.name || email;
+
+  return (
+    <label className="block mb-3 relative">
+      <span className="text-sm font-medium text-teams-dark">
+        Invite people
+      </span>
+      <div className="mt-1 w-full rounded-md border border-teams-line px-2 py-1.5 flex flex-wrap gap-1.5 focus-within:border-teams-purple focus-within:ring-1 focus-within:ring-teams-purple">
+        {value.map((email) => (
+          <span
+            key={email}
+            className="inline-flex items-center gap-1 bg-teams-purple/10 text-teams-purple text-sm rounded-full pl-2.5 pr-1 py-0.5"
+          >
+            <span className="max-w-[180px] truncate">{nameFor(email)}</span>
+            <button
+              type="button"
+              onClick={() => onChange(value.filter((v) => v !== email))}
+              aria-label={`Remove ${email}`}
+              className="w-4 h-4 rounded-full hover:bg-teams-purple/20 flex items-center justify-center text-xs leading-none"
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          onFocus={() => setFocus(true)}
+          onBlur={() => setTimeout(() => setFocus(false), 150)}
+          placeholder={value.length === 0 ? "Enter name or email" : ""}
+          className="flex-1 min-w-[140px] px-1 py-1 outline-none text-sm"
+        />
+      </div>
+      {focus && suggestions.length > 0 && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-teams-line rounded-lg shadow-lg py-1 max-h-52 overflow-y-auto">
+          {suggestions.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              // onMouseDown so it fires before the input's blur hides the list.
+              onMouseDown={(e) => {
+                e.preventDefault();
+                add(c.email);
+              }}
+              className="w-full text-left px-3 py-2 hover:bg-teams-bg flex flex-col"
+            >
+              <span className="text-sm text-teams-dark">{c.name}</span>
+              <span className="text-xs text-teams-gray">{c.email}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <span className="block mt-1 text-xs text-teams-gray">
+        They&apos;ll get an email invite, see it on their dashboard, and skip
+        the waiting room.
+      </span>
+    </label>
   );
 }
 
@@ -826,9 +1034,23 @@ function GoogleIcon() {
   );
 }
 
-function LinkIcon() {
+function VideoIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M15 10.5V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3.5l5 4v-11l-5 4Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function LinkIcon({ small }: { small?: boolean }) {
+  const s = small ? 15 : 20;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none">
       <path
         d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
         stroke="currentColor"
