@@ -255,6 +255,21 @@ export default function TeamsCall({
   // ----- Video effects: none / blur / virtual background (Teams-style) -----
   const effects = useVideoEffects();
 
+  // Reactions, sendable from the landscape rail's More menu too (the round
+  // ReactionButton keeps its own sender for the bottom bar).
+  const { send: sendReactionData } = useDataChannel("reactions");
+  const sendReaction = useCallback(
+    (emoji: string) => {
+      try {
+        sendReactionData(new TextEncoder().encode(emoji), {});
+      } catch {
+        /* ignore */
+      }
+      window.dispatchEvent(new CustomEvent("local-reaction", { detail: emoji }));
+    },
+    [sendReactionData]
+  );
+
   // ----- Screen share with real feedback -----
   const [shareBusy, setShareBusy] = useState(false);
   const toggleShare = useCallback(async () => {
@@ -396,6 +411,10 @@ export default function TeamsCall({
   // like WhatsApp / Teams mobile). An explicit spotlight switches to the
   // one-big-speaker stage with a self PiP.
   const isMobile = useIsMobile();
+  const isLandscape = useIsLandscape();
+  // Landscape phones get the Teams layout: vertical control rail on the
+  // right, self as a floating PiP, remotes on the stage.
+  const railMode = isMobile && isLandscape;
   const selfTile = cameraTiles.find((t) => t.participant.isLocal);
   const remoteTiles = cameraTiles.filter((t) => !t.participant.isLocal);
   const mobileOthers = spotlightTile
@@ -556,12 +575,31 @@ export default function TeamsCall({
               )}
             </aside>
           )}
+
+          {/* Landscape-phone control rail (Teams style, right edge). */}
+          {railMode && !hideChrome && (
+            <ControlRail
+              isMicrophoneEnabled={isMicrophoneEnabled}
+              isCameraEnabled={isCameraEnabled}
+              myHandUp={hands.myHandUp}
+              onToggleHand={hands.toggleHand}
+              canManage={canManage}
+              recording={recording}
+              recBusy={recBusy}
+              onToggleRecording={toggleRecording}
+              onShare={toggleShare}
+              onOpenPanel={(p) => setPanel(panel === p ? "none" : p)}
+              onReact={sendReaction}
+              unread={unread}
+              participants={participants.length}
+            />
+          )}
         </div>
 
-        {/* ---------- Control pill ---------- */}
+        {/* ---------- Control pill (bottom bar; landscape phones use the rail) ---------- */}
         <footer
           className={`shrink-0 justify-center px-2 pb-3 pt-2 ${
-            hideChrome ? "hidden" : "flex"
+            hideChrome || railMode ? "hidden" : "flex"
           }`}
         >
           <div className="flex flex-wrap items-center justify-center gap-1.5 bg-teams-stage/95 backdrop-blur rounded-2xl px-2 sm:px-3 py-2 shadow-2xl border border-white/10 max-w-full">
@@ -702,6 +740,180 @@ export default function TeamsCall({
   );
 }
 
+/* =====================  Landscape control rail  ===================== */
+
+/**
+ * The Teams landscape-phone controls: a slim vertical rail on the right with
+ * the essentials (mic, camera, hand, leave) and a "…" sheet for the rest.
+ */
+function ControlRail({
+  isMicrophoneEnabled,
+  isCameraEnabled,
+  myHandUp,
+  onToggleHand,
+  canManage,
+  recording,
+  recBusy,
+  onToggleRecording,
+  onShare,
+  onOpenPanel,
+  onReact,
+  unread,
+  participants,
+}: {
+  isMicrophoneEnabled: boolean;
+  isCameraEnabled: boolean;
+  myHandUp: boolean;
+  onToggleHand: () => void;
+  canManage: boolean;
+  recording: boolean;
+  recBusy: boolean;
+  onToggleRecording: () => void;
+  onShare: () => void;
+  onOpenPanel: (p: Exclude<Panel, "none">) => void;
+  onReact: (emoji: string) => void;
+  unread: number;
+  participants: number;
+}) {
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  const railBtn = (active: boolean) =>
+    `w-11 h-11 rounded-full flex items-center justify-center transition ${
+      active
+        ? "bg-teams-purple text-white"
+        : "bg-white/10 text-gray-100 hover:bg-white/20"
+    }`;
+
+  return (
+    <div className="shrink-0 flex flex-col items-center justify-center gap-2 px-2 bg-teams-stage/95 border-l border-white/10 relative z-20">
+      <TrackToggle
+        source={Track.Source.Microphone}
+        showIcon={false}
+        aria-label="Toggle microphone"
+        className={railBtn(isMicrophoneEnabled)}
+      >
+        {isMicrophoneEnabled ? <MicIcon /> : <MicOffIcon />}
+      </TrackToggle>
+      <TrackToggle
+        source={Track.Source.Camera}
+        showIcon={false}
+        aria-label="Toggle camera"
+        className={railBtn(isCameraEnabled)}
+      >
+        {isCameraEnabled ? <CamIcon /> : <CamOffIcon />}
+      </TrackToggle>
+      <button
+        onClick={onToggleHand}
+        aria-label={myHandUp ? "Lower hand" : "Raise hand"}
+        className={railBtn(myHandUp)}
+      >
+        <HandIcon />
+      </button>
+      <button
+        onClick={() => setMoreOpen((o) => !o)}
+        aria-label="More options"
+        className={railBtn(moreOpen) + " relative"}
+      >
+        <MoreIcon />
+        {unread > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500" />
+        )}
+      </button>
+      <DisconnectButton
+        aria-label="Leave meeting"
+        className="w-11 h-11 rounded-full flex items-center justify-center !bg-red-600 hover:!bg-red-700 !text-white !border-0"
+      >
+        <LeaveIcon />
+      </DisconnectButton>
+
+      {moreOpen && (
+        <>
+          <button
+            aria-label="Close menu"
+            onClick={() => setMoreOpen(false)}
+            className="fixed inset-0 z-20 cursor-default"
+          />
+          <div className="absolute right-full bottom-2 mr-2 z-30 w-56 bg-teams-stage border border-white/15 rounded-xl shadow-2xl py-1 text-sm text-white">
+            <div className="flex justify-center gap-1 px-2 py-2 border-b border-white/10">
+              {EMOJIS.map((e) => (
+                <button
+                  key={e}
+                  onClick={() => {
+                    onReact(e);
+                    setMoreOpen(false);
+                  }}
+                  className="text-xl hover:scale-125 transition-transform"
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+            <RailMenuItem
+              onClick={() => {
+                onOpenPanel("chat");
+                setMoreOpen(false);
+              }}
+            >
+              Chat{unread > 0 ? ` (${unread} new)` : ""}
+            </RailMenuItem>
+            <RailMenuItem
+              onClick={() => {
+                onOpenPanel("people");
+                setMoreOpen(false);
+              }}
+            >
+              People ({participants})
+            </RailMenuItem>
+            <RailMenuItem
+              onClick={() => {
+                onOpenPanel("effects");
+                setMoreOpen(false);
+              }}
+            >
+              Video effects
+            </RailMenuItem>
+            <RailMenuItem
+              onClick={() => {
+                onShare();
+                setMoreOpen(false);
+              }}
+            >
+              Share screen
+            </RailMenuItem>
+            {canManage && (
+              <RailMenuItem
+                onClick={() => {
+                  if (!recBusy) onToggleRecording();
+                  setMoreOpen(false);
+                }}
+              >
+                {recording ? "Stop recording" : "Record"}
+              </RailMenuItem>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function RailMenuItem({
+  children,
+  onClick,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left px-4 py-2.5 hover:bg-white/10"
+    >
+      {children}
+    </button>
+  );
+}
+
 /* =====================  Responsive helper  ===================== */
 
 /**
@@ -750,17 +962,81 @@ function MobileGrid({
   tiles: TrackReferenceOrPlaceholder[];
   onSpotlight: (identity: string) => void;
 }) {
-  const n = tiles.length;
   const landscape = useIsLandscape();
-  // Portrait: stack (1 col up to 2 people, then 2 cols) — tall tiles suit
-  // portrait cameras. Landscape flips it: as few ROWS as possible, so tiles
-  // stay wide and faces aren't squeezed into letterbox strips.
-  const cols = landscape
-    ? Math.min(n, n <= 3 ? 3 : Math.ceil(n / 2))
-    : n <= 2
-      ? 1
-      : 2;
-  const spanLast = !landscape && n > 2 && n % 2 === 1;
+  const self = tiles.find((t) => t.participant.isLocal);
+  const remotes = tiles.filter((t) => !t.participant.isLocal);
+
+  // ---- Landscape: Teams-style — remotes fill the stage, you float as a
+  // PiP, and the current speaker gets the big tile when the count is odd.
+  if (landscape && remotes.length > 0) {
+    const sorted = [...remotes].sort((a, b) => {
+      const sp =
+        Number(b.participant.isSpeaking) - Number(a.participant.isSpeaking);
+      if (sp !== 0) return sp;
+      return (
+        (b.participant.lastSpokeAt?.getTime() ?? 0) -
+        (a.participant.lastSpokeAt?.getTime() ?? 0)
+      );
+    });
+    const n = remotes.length;
+    const tile = (t: TrackReferenceOrPlaceholder, style?: React.CSSProperties) => (
+      <div key={t.participant.identity} className="h-full min-h-0" style={style}>
+        <Tile
+          trackRef={t}
+          fill
+          flush
+          onSpotlight={() => onSpotlight(t.participant.identity)}
+        />
+      </div>
+    );
+
+    let stage: React.ReactNode;
+    if (n === 3) {
+      // Two stacked on the left, the speaker large on the right (the exact
+      // Teams arrangement for three remotes).
+      const [dominant, ...rest] = sorted;
+      stage = (
+        <div
+          className="grid h-full w-full gap-[2px] bg-black"
+          style={{
+            gridTemplateColumns: "1fr 1.4fr",
+            gridTemplateRows: "1fr 1fr",
+          }}
+        >
+          {tile(rest[0])}
+          {tile(dominant, { gridColumn: 2, gridRow: "1 / span 2" })}
+          {tile(rest[1])}
+        </div>
+      );
+    } else {
+      const cols = n === 1 ? 1 : n === 2 ? 2 : n <= 4 ? 2 : n <= 6 ? 3 : Math.ceil(n / 2);
+      stage = (
+        <div
+          className="grid auto-rows-fr gap-[2px] h-full w-full bg-black"
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        >
+          {remotes.map((t) => tile(t))}
+        </div>
+      );
+    }
+
+    return (
+      <div className="relative h-full w-full">
+        {stage}
+        {self && (
+          <SelfPip
+            trackRef={self}
+            position="top-2 right-2 w-36 h-24"
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ---- Portrait (or alone): everyone equal, edge to edge, stacked.
+  const n = tiles.length;
+  const cols = n <= 2 ? 1 : 2;
+  const spanLast = n > 2 && n % 2 === 1;
   return (
     <div
       className="grid auto-rows-fr gap-[2px] h-full w-full bg-black"
@@ -824,12 +1100,21 @@ function MobileStage({
 }
 
 /** Small floating self-view, like the Teams mobile PiP. */
-function SelfPip({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
+function SelfPip({
+  trackRef,
+  position = "bottom-3 right-3 w-24 h-32",
+}: {
+  trackRef: TrackReferenceOrPlaceholder;
+  /** Corner + size classes — portrait defaults, landscape passes its own. */
+  position?: string;
+}) {
   const { isMuted: camMuted } = useTrackMutedIndicator(trackRef);
   const hasVideo = !!trackRef.publication && !camMuted;
   const name = trackRef.participant.name || trackRef.participant.identity;
   return (
-    <div className="tile-fill absolute bottom-3 right-3 w-24 h-32 rounded-xl overflow-hidden bg-teams-stage shadow-2xl ring-1 ring-white/25">
+    <div
+      className={`tile-fill absolute ${position} rounded-xl overflow-hidden bg-teams-stage shadow-2xl ring-1 ring-white/25`}
+    >
       {hasVideo ? (
         <VideoTrack
           trackRef={trackRef as TrackReference}
