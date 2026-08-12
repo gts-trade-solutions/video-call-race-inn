@@ -24,7 +24,7 @@ import {
   type TrackReference,
   type TrackReferenceOrPlaceholder,
 } from "@livekit/components-react";
-import { Track, type Participant } from "livekit-client";
+import { Track, type Participant, type LocalVideoTrack } from "livekit-client";
 import { Toasts, useToasts } from "@/components/call/Toasts";
 import EffectsPanel from "@/components/call/EffectsPanel";
 import { useVideoEffects } from "@/components/call/useVideoEffects";
@@ -271,6 +271,47 @@ export default function TeamsCall({
     },
     [sendReactionData]
   );
+
+  // ----- Flip between the front and rear camera (phones) -----
+  // The rear camera is how you actually "present" something physical from a
+  // phone — a document, a whiteboard, a part on a bench.
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
+  const [flipBusy, setFlipBusy] = useState(false);
+  const [hasTwoCameras, setHasTwoCameras] = useState(false);
+  useEffect(() => {
+    navigator.mediaDevices
+      ?.enumerateDevices()
+      .then((ds) =>
+        setHasTwoCameras(
+          ds.filter((d) => d.kind === "videoinput").length > 1
+        )
+      )
+      .catch(() => {});
+  }, []);
+
+  const flipCamera = useCallback(async () => {
+    if (flipBusy) return;
+    const pub = localParticipant?.getTrackPublication(Track.Source.Camera);
+    const track = pub?.track as LocalVideoTrack | undefined;
+    if (!track) {
+      notify("Turn your camera on first.");
+      return;
+    }
+    setFlipBusy(true);
+    const next = facingMode === "user" ? "environment" : "user";
+    try {
+      await track.restartTrack({ facingMode: next });
+      setFacingMode(next);
+      // A restarted track is a new MediaStreamTrack, so any blur/background
+      // has to be put back on it.
+      if (effects.effect.mode !== "none") await effects.apply(effects.effect);
+    } catch (e) {
+      console.error("camera flip error:", e);
+      notify("Couldn't switch camera on this device.");
+    } finally {
+      setFlipBusy(false);
+    }
+  }, [flipBusy, localParticipant, facingMode, notify, effects]);
 
   // ----- Screen share with real feedback -----
   // Phones whose browser has no screen-capture API get "present a photo"
@@ -683,6 +724,7 @@ export default function TeamsCall({
               recBusy={recBusy}
               onToggleRecording={toggleRecording}
               onShare={toggleShare}
+              onFlipCamera={hasTwoCameras ? flipCamera : undefined}
               onOpenPanel={(p) => setPanel(panel === p ? "none" : p)}
               onReact={sendReaction}
               unread={unread}
@@ -732,6 +774,22 @@ export default function TeamsCall({
               <span className="ctrl-label">Effects</span>
             </button>
 
+            {/* Phones: flip to the rear camera to show a document or board. */}
+            {hasTwoCameras && (
+              <button
+                onClick={flipCamera}
+                disabled={flipBusy}
+                aria-label="Switch camera"
+                title="Switch between front and rear camera"
+                className={
+                  ctrlBtn(facingMode === "environment") + " disabled:opacity-50"
+                }
+              >
+                <FlipCameraIcon />
+                <span className="ctrl-label">{flipBusy ? "…" : "Flip"}</span>
+              </button>
+            )}
+
             <button
               onClick={toggleShare}
               disabled={shareBusy}
@@ -744,11 +802,13 @@ export default function TeamsCall({
                 {shareBusy ? "…" : isScreenShareEnabled ? "Stop" : "Share"}
               </span>
             </button>
+            {/* Visually hidden rather than display:none — some mobile
+                browsers refuse to open a picker for an undisplayed input. */}
             <input
               ref={photoInputRef}
               type="file"
               accept="image/*"
-              className="hidden"
+              className="absolute w-px h-px opacity-0 pointer-events-none -z-10"
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) presentPhoto(f);
@@ -862,6 +922,7 @@ function ControlRail({
   recBusy,
   onToggleRecording,
   onShare,
+  onFlipCamera,
   onOpenPanel,
   onReact,
   unread,
@@ -876,6 +937,8 @@ function ControlRail({
   recBusy: boolean;
   onToggleRecording: () => void;
   onShare: () => void;
+  /** Omitted when the device has only one camera. */
+  onFlipCamera?: () => void;
   onOpenPanel: (p: Exclude<Panel, "none">) => void;
   onReact: (emoji: string) => void;
   unread: number;
@@ -978,13 +1041,23 @@ function ControlRail({
             >
               Video effects
             </RailMenuItem>
+            {onFlipCamera && (
+              <RailMenuItem
+                onClick={() => {
+                  onFlipCamera();
+                  setMoreOpen(false);
+                }}
+              >
+                Switch camera
+              </RailMenuItem>
+            )}
             <RailMenuItem
               onClick={() => {
                 onShare();
                 setMoreOpen(false);
               }}
             >
-              Share screen
+              Share / present
             </RailMenuItem>
             {canManage && (
               <RailMenuItem
@@ -2312,6 +2385,12 @@ const HandIcon = ({
   >
     ✋
   </span>
+);
+const FlipCameraIcon = () => (
+  <svg {...I({})}>
+    <path d="M15 10.5V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3.5l5 4v-11l-5 4Z" />
+    <path d="M6.5 9.5a3 3 0 0 1 4.5-1M10.5 14.5a3 3 0 0 1-4.5 1" />
+  </svg>
 );
 const CursorIcon = () => (
   <svg {...I({ width: 18, height: 18 })}>
