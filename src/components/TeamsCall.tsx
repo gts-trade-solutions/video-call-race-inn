@@ -360,8 +360,9 @@ export default function TeamsCall({
       return;
     }
 
-    // No capture API (phones, in-app browsers): offer photo presenting.
+    // No capture API at all (phones, in-app browsers): present a photo.
     if (!navigator.mediaDevices?.getDisplayMedia) {
+      notify("Screen sharing isn't available here — pick a photo to present.");
       photoInputRef.current?.click();
       return;
     }
@@ -375,12 +376,12 @@ export default function TeamsCall({
     } catch (e) {
       // Cancelling the picker throws NotAllowedError — that's not a failure.
       const err = e as DOMException;
-      if (err?.name !== "NotAllowedError") {
-        console.error("screen share error:", e);
-        notify(
-          `Couldn't start screen sharing${err?.name ? ` (${err.name})` : ""}. You can present a photo instead from the Share button.`
-        );
-      }
+      if (err?.name === "NotAllowedError") return;
+      console.error("screen share error:", e);
+      // Some phone browsers expose getDisplayMedia but reject the call, so a
+      // failure here lands on the same photo fallback rather than a dead end.
+      notify("Screen sharing didn't start — pick a photo to present instead.");
+      photoInputRef.current?.click();
     } finally {
       setShareBusy(false);
     }
