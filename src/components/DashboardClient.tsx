@@ -295,6 +295,16 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
                     <NotesIcon />
                     <span className="hidden sm:inline">Notes</span>
                   </a>
+                  <a
+                    href={`/api/meetings/summary?room=${encodeURIComponent(
+                      m.roomId
+                    )}&format=md`}
+                    title="Download key points, decisions and action items"
+                    className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5 inline-flex items-center gap-1.5"
+                  >
+                    <SummaryIcon />
+                    <span className="hidden sm:inline">Summary</span>
+                  </a>
                   <button
                     onClick={() => copy(m.roomId)}
                     className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5"
@@ -564,6 +574,27 @@ function RecordingStatus({ status }: { status: Recording["status"] }) {
   );
 }
 
+
+function SummaryIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 6h16M4 11h16M4 16h9"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <circle cx="18" cy="17" r="3.2" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M16.7 17.1l.9.9 1.8-1.9"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 function NotesIcon() {
   return (

@@ -44,6 +44,15 @@ export function CaptionOverlay({ captions }: { captions: UseLiveCaptions }) {
   );
 }
 
+type Summary = {
+  empty?: boolean;
+  message?: string;
+  keyPoints?: string[];
+  decisions?: string[];
+  actionItems?: { owner: string; text: string; due?: string }[];
+  openQuestions?: string[];
+};
+
 /** The running transcript — the actual "meeting notes". */
 export function NotesPanel({
   captions,
@@ -58,6 +67,24 @@ export function NotesPanel({
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const [stick, setStick] = useState(true);
+  const [tab, setTab] = useState<"transcript" | "summary">("transcript");
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [summaryBusy, setSummaryBusy] = useState(false);
+
+  async function loadSummary() {
+    setSummaryBusy(true);
+    try {
+      const res = await fetch(
+        `/api/meetings/summary?room=${encodeURIComponent(room)}`
+      );
+      if (!res.ok) throw new Error("failed");
+      setSummary(await res.json());
+    } catch {
+      onNotice("Couldn't build the summary — try again in a moment.");
+    } finally {
+      setSummaryBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (stick) endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -112,7 +139,43 @@ export function NotesPanel({
         </p>
       </div>
 
-      {/* Transcript */}
+      {/* Transcript | Summary */}
+      <div className="flex gap-1 px-3 pt-2 border-b border-white/10 shrink-0">
+        {(["transcript", "summary"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => {
+              setTab(t);
+              if (t === "summary" && !summary && !summaryBusy) loadSummary();
+            }}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px capitalize transition ${
+              tab === t
+                ? "border-teams-purple text-white"
+                : "border-transparent text-gray-400 hover:text-white"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+        {tab === "summary" && (
+          <button
+            onClick={loadSummary}
+            disabled={summaryBusy}
+            className="ml-auto text-xs text-teams-purple hover:underline disabled:opacity-50"
+          >
+            {summaryBusy ? "Working…" : "Refresh"}
+          </button>
+        )}
+      </div>
+
+      {tab === "summary" ? (
+        <SummaryView
+          summary={summary}
+          busy={summaryBusy}
+          room={room}
+          onNotice={onNotice}
+        />
+      ) : (
       <div
         onScroll={(e) => {
           const el = e.currentTarget;
@@ -143,6 +206,7 @@ export function NotesPanel({
         )}
         <div ref={endRef} />
       </div>
+      )}
 
       {/* Export */}
       <div className="p-3 border-t border-white/10 flex gap-2">
@@ -161,6 +225,92 @@ export function NotesPanel({
           Download
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Key points, decisions, action items and open questions. */
+function SummaryView({
+  summary,
+  busy,
+  room,
+  onNotice,
+}: {
+  summary: Summary | null;
+  busy: boolean;
+  room: string;
+  onNotice: (text: string) => void;
+}) {
+  if (busy && !summary) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
+        Reading the transcript…
+      </div>
+    );
+  }
+  if (!summary || summary.empty) {
+    return (
+      <div className="flex-1 px-4 py-6 text-sm text-gray-400 text-center">
+        {summary?.message ??
+          "Turn on transcription and talk for a while, then come back."}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+      <SummarySection title="Key points" items={summary.keyPoints} />
+      <SummarySection title="Decisions" items={summary.decisions} />
+
+      {summary.actionItems && summary.actionItems.length > 0 && (
+        <div>
+          <h3 className="text-[11px] uppercase tracking-wide text-teams-purple font-semibold mb-1">
+            Action items
+          </h3>
+          <ul className="space-y-1.5">
+            {summary.actionItems.map((a, i) => (
+              <li key={i} className="text-sm">
+                <span className="font-semibold text-amber-300">{a.owner}</span>
+                {a.due && (
+                  <span className="ml-1.5 text-[11px] bg-white/10 rounded px-1.5 py-0.5">
+                    {a.due}
+                  </span>
+                )}
+                <div className="text-gray-200 break-words">{a.text}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <SummarySection title="Open questions" items={summary.openQuestions} />
+
+      <a
+        href={`/api/meetings/summary?room=${encodeURIComponent(room)}&format=md`}
+        onClick={() => onNotice("Downloading the summary…")}
+        className="block text-center text-sm bg-white/10 hover:bg-white/20 rounded-lg py-2 text-white"
+      >
+        Download summary
+      </a>
+    </div>
+  );
+}
+
+function SummarySection({ title, items }: { title: string; items?: string[] }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div>
+      <h3 className="text-[11px] uppercase tracking-wide text-teams-purple font-semibold mb-1">
+        {title}
+      </h3>
+      <ul className="space-y-1">
+        {items.map((t, i) => (
+          <li key={i} className="text-sm text-white flex gap-2">
+            <span className="text-gray-500">•</span>
+            <span className="break-words">{t}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
