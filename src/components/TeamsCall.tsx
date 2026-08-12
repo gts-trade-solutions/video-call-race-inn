@@ -32,6 +32,8 @@ import {
 } from "livekit-client";
 import Logo from "@/components/Logo";
 import { Toasts, useToasts } from "@/components/call/Toasts";
+import { CaptionOverlay, NotesPanel } from "@/components/call/CaptionsUI";
+import { useLiveCaptions } from "@/components/call/useLiveCaptions";
 import EffectsPanel from "@/components/call/EffectsPanel";
 import { useVideoEffects } from "@/components/call/useVideoEffects";
 import { useRaiseHand, type UseRaiseHand } from "@/components/call/useRaiseHand";
@@ -50,7 +52,7 @@ import {
  */
 const HandsContext = createContext<Record<string, number>>({});
 
-type Panel = "none" | "chat" | "people" | "effects";
+type Panel = "none" | "chat" | "people" | "effects" | "notes";
 type WaitingPerson = {
   userId: number;
   name: string;
@@ -146,6 +148,10 @@ export default function TeamsCall({
     onNotice: notify,
   });
   const handCount = hands.order.length;
+
+  // Free AI-style note taking: each browser transcribes its own mic and
+  // shares the text, so nothing is sent to a transcription service.
+  const captions = useLiveCaptions({ room, onNotice: notify });
 
   // In-call chat over a reliable data channel (same mechanism as reactions).
   const [chatMsgs, setChatMsgs] = useState<CallChatMsg[]>([]);
@@ -654,7 +660,7 @@ export default function TeamsCall({
         {/* ---------- Body: stage + side panel ---------- */}
         <div className="flex flex-1 min-h-0 relative">
           <main
-            className={`flex-1 min-w-0 ${
+            className={`relative flex-1 min-w-0 ${
               mobileGridActive ? "p-0" : "p-3 sm:p-4"
             }`}
             onClick={
@@ -699,6 +705,9 @@ export default function TeamsCall({
                 onSpotlight={toggleSpotlight}
               />
             )}
+
+            {/* Subtitles sit over whatever layout is on screen. */}
+            {captions.anyoneCaptioning && <CaptionOverlay captions={captions} />}
           </main>
 
           {panel !== "none" && (
@@ -715,6 +724,18 @@ export default function TeamsCall({
                   onClose={() => setPanel("none")}
                 >
                   <EffectsPanel effects={effects} onNotice={notify} />
+                </PanelShell>
+              ) : panel === "notes" ? (
+                <PanelShell
+                  title="Meeting notes"
+                  onClose={() => setPanel("none")}
+                >
+                  <NotesPanel
+                    captions={captions}
+                    room={room}
+                    title={title}
+                    onNotice={notify}
+                  />
                 </PanelShell>
               ) : (
                 <PeoplePanel
@@ -879,6 +900,19 @@ export default function TeamsCall({
               <span className="ctrl-label">
                 {recBusy ? "…" : recording ? "Stop" : "Record"}
               </span>
+            </button>
+
+            <button
+              onClick={() => setPanel(panel === "notes" ? "none" : "notes")}
+              aria-label="Live captions and meeting notes"
+              title="Live captions & notes"
+              className={ctrlBtn(panel === "notes" || captions.on) + " relative"}
+            >
+              <CaptionsIcon />
+              <span className="ctrl-label">Notes</span>
+              {captions.on && (
+                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-teams-purple ring-2 ring-teams-stage" />
+              )}
             </button>
 
             <button
@@ -1049,6 +1083,14 @@ function ControlRail({
               }}
             >
               People ({participants})
+            </RailMenuItem>
+            <RailMenuItem
+              onClick={() => {
+                onOpenPanel("notes");
+                setMoreOpen(false);
+              }}
+            >
+              Captions &amp; notes
             </RailMenuItem>
             <RailMenuItem
               onClick={() => {
@@ -2411,6 +2453,12 @@ const FlipCameraIcon = () => (
   <svg {...I({})}>
     <path d="M15 10.5V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3.5l5 4v-11l-5 4Z" />
     <path d="M6.5 9.5a3 3 0 0 1 4.5-1M10.5 14.5a3 3 0 0 1-4.5 1" />
+  </svg>
+);
+const CaptionsIcon = () => (
+  <svg {...I({})}>
+    <rect x="2" y="5" width="20" height="14" rx="2.5" />
+    <path d="M9 10.5a2.2 2.2 0 1 0 0 3M17 10.5a2.2 2.2 0 1 0 0 3" />
   </svg>
 );
 const CursorIcon = () => (

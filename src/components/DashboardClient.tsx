@@ -285,6 +285,16 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
                     <CalIcon />
                     <span className="hidden sm:inline">Invite (.ics)</span>
                   </a>
+                  <a
+                    href={`/api/meetings/transcript?room=${encodeURIComponent(
+                      m.roomId
+                    )}&format=txt`}
+                    title="Download the notes captured by live captions"
+                    className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5 inline-flex items-center gap-1.5"
+                  >
+                    <NotesIcon />
+                    <span className="hidden sm:inline">Notes</span>
+                  </a>
                   <button
                     onClick={() => copy(m.roomId)}
                     className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5"
@@ -554,6 +564,25 @@ function RecordingStatus({ status }: { status: Recording["status"] }) {
   );
 }
 
+
+function NotesIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 3v5h5M8.5 13h7M8.5 17h5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 
 function CalIcon() {
   return (

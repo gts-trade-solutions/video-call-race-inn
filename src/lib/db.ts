@@ -282,6 +282,25 @@ export function ensureSchema(): Promise<void> {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
 
+      // Live-caption transcript lines — the meeting notes. Written by each
+      // speaker's own browser, so `user_id` is the speaker.
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS meeting_transcripts (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          meeting_id INT NOT NULL,
+          user_id INT NULL,
+          speaker VARCHAR(120) NOT NULL,
+          text TEXT NOT NULL,
+          spoken_at TIMESTAMP NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_tr_meeting (meeting_id, spoken_at),
+          CONSTRAINT fk_tr_meeting FOREIGN KEY (meeting_id)
+            REFERENCES meetings(id) ON DELETE CASCADE,
+          CONSTRAINT fk_tr_user FOREIGN KEY (user_id)
+            REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
       // Co-hosts ("presenters"): people the owner promoted so they can record,
       // admit from the lobby and manage participants. One row per promotion.
       await pool.query(`
