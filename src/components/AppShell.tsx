@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { SessionUser } from "@/lib/auth";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
 import IncomingCall from "@/components/IncomingCall";
+import Logo from "@/components/Logo";
 
 export default function AppShell({
   user,
@@ -185,12 +186,7 @@ export default function AppShell({
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="h-12 sm:h-14 shrink-0 bg-teams-purple text-white flex items-center px-3 sm:px-4 justify-between shadow z-10">
           <div className="bg-white rounded-md px-2 py-1 sm:px-3 sm:py-1.5 flex items-center min-w-0">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/logo.svg"
-              alt="Race Innovations"
-              className="h-6 sm:h-9 w-auto object-contain"
-            />
+            <Logo className="h-6 sm:h-9 w-auto object-contain" />
           </div>
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <ThemeSwitcher />

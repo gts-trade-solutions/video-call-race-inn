@@ -30,6 +30,7 @@ import {
   type Participant,
   type LocalVideoTrack,
 } from "livekit-client";
+import Logo from "@/components/Logo";
 import { Toasts, useToasts } from "@/components/call/Toasts";
 import EffectsPanel from "@/components/call/EffectsPanel";
 import { useVideoEffects } from "@/components/call/useVideoEffects";
@@ -618,12 +619,7 @@ export default function TeamsCall({
         >
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <div className="bg-white rounded px-1.5 py-1 flex items-center shrink-0">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/logo.svg"
-                alt="Race Innovations"
-                className="h-5 sm:h-7 w-auto object-contain"
-              />
+              <Logo className="h-5 sm:h-7 w-auto object-contain" />
             </div>
             <div className="leading-tight min-w-0">
               <div className="text-sm font-semibold leading-tight truncate">

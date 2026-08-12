@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import Logo from "@/components/Logo";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -95,12 +96,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#e8e8f8] via-[#f5f5f5] to-[#e3e3f6] px-4 py-8">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-6 sm:p-8 border border-teams-line">
         <div className="mb-6">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/logo.svg"
-            alt="Race Innovations"
-            className="h-14 sm:h-16 w-auto object-contain mb-4"
-          />
+          <Logo className="h-14 sm:h-16 w-auto object-contain mb-4" />
           <h1 className="text-xl font-semibold text-teams-dark leading-tight">
             {isRegister ? "Create your account" : "Welcome back"}
           </h1>

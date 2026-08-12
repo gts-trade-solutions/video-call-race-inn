@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { PasswordField } from "@/components/AuthForm";
+import Logo from "@/components/Logo";
 
 export default function ForgotPage() {
   const router = useRouter();
@@ -83,12 +84,7 @@ export default function ForgotPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#e8e8f8] via-[#f5f5f5] to-[#e3e3f6] px-4 py-8">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-6 sm:p-8 border border-teams-line">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/logo.svg"
-          alt="Race Innovations"
-          className="h-14 sm:h-16 w-auto object-contain mb-4"
-        />
+        <Logo className="h-14 sm:h-16 w-auto object-contain mb-4" />
         <h1 className="text-xl font-semibold text-teams-dark">
           Reset your password
         </h1>
