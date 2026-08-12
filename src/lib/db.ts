@@ -224,6 +224,15 @@ export function ensureSchema(): Promise<void> {
         if ((e as { errno?: number }).errno !== 1060) throw e;
       }
 
+      // Migration: when the "starting soon" nudge was sent (null = not yet).
+      try {
+        await pool.query(
+          "ALTER TABLE meetings ADD COLUMN reminded_at TIMESTAMP NULL DEFAULT NULL"
+        );
+      } catch (e) {
+        if ((e as { errno?: number }).errno !== 1060) throw e;
+      }
+
       // Migration: waiting-room toggle (1 = non-hosts must be admitted).
       try {
         await pool.query(
@@ -343,6 +352,16 @@ export function ensureSchema(): Promise<void> {
         );
       } catch (e) {
         if ((e as { errno?: number }).errno !== 1060) throw e;
+      }
+
+      // Migration: unread counting scans (recipient, read_at) constantly —
+      // give it a covering index. (1061 = duplicate index name.)
+      try {
+        await pool.query(
+          "ALTER TABLE messages ADD INDEX idx_recipient_read (recipient_id, read_at)"
+        );
+      } catch (e) {
+        if ((e as { errno?: number }).errno !== 1061) throw e;
       }
 
       // Migration: presence — last activity timestamp.

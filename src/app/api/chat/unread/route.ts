@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureSchema, getPool } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { sweepMeetingReminders } from "@/lib/reminders";
 import type { RowDataPacket } from "mysql2";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,14 @@ export async function GET() {
     } catch {
       /* column may be mid-migration; ignore */
     }
+
+    // Piggyback the "starting in 15 minutes" sweep on this poll — the app has
+    // no scheduler process, and this endpoint is hit by every open client.
+    // It self-throttles to once a minute and never throws.
+    sweepMeetingReminders().catch((e) =>
+      console.error("reminder sweep error:", e)
+    );
+
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT COUNT(*) AS count FROM messages
        WHERE recipient_id = :me AND read_at IS NULL`,

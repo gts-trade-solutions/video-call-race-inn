@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { ensureSchema, getPool } from "@/lib/db";
+import { rateLimit, MINUTE } from "@/lib/rateLimit";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
 export const runtime = "nodejs";
@@ -132,6 +133,15 @@ export async function POST(req: Request) {
   const pool = getPool();
 
   if (body.action === "ring") {
+    // A person places a handful of calls a minute at most — anything beyond
+    // is a stuck client or abuse fanning out ringtones.
+    const rl = rateLimit(`ring:${user.id}`, 20, MINUTE);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "Too many calls — slow down a little." },
+        { status: 429 }
+      );
+    }
     const roomId = body.roomId;
     const mode = body.mode === "audio" ? "audio" : "video";
     if (!roomId) {

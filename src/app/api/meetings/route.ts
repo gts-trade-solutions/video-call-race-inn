@@ -10,6 +10,7 @@ import {
   getValidAccessToken,
 } from "@/lib/googleCalendar";
 import { sendInviteEmail } from "@/lib/invites";
+import { rateLimit, MINUTE } from "@/lib/rateLimit";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
 export const dynamic = "force-dynamic";
@@ -57,6 +58,16 @@ export async function POST(req: Request) {
     const user = await getSession();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Creating meetings fans out invite emails and chat messages — cap the
+    // rate so one stuck client (or abuser) can't flood inboxes.
+    const rl = rateLimit(`meetings:${user.id}`, 15, MINUTE);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "Too many meetings created — try again in a minute." },
+        { status: 429 }
+      );
     }
 
     const body = await req.json().catch(() => ({}));

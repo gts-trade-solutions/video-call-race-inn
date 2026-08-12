@@ -21,10 +21,12 @@ type Phase =
 
 export default function MeetingRoom({
   room,
+  title = "",
   userName,
   audioOnly = false,
 }: {
   room: string;
+  title?: string;
   userName: string;
   audioOnly?: boolean;
 }) {
@@ -350,6 +352,7 @@ export default function MeetingRoom({
       >
         <TeamsCall
           room={room}
+          title={title}
           isHost={isHost}
           isOwner={isOwner}
           ownerIdentity={ownerIdentity}

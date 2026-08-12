@@ -61,12 +61,14 @@ type CallChatMsg = {
 
 export default function TeamsCall({
   room,
+  title = "",
   isHost = false,
   isOwner = false,
   ownerIdentity = "",
   coHostIdentities = [],
 }: {
   room: string;
+  title?: string;
   /** May run the meeting — the owner or a co-host. */
   isHost?: boolean;
   /** Created the meeting; only they can promote co-hosts. */
@@ -271,29 +273,102 @@ export default function TeamsCall({
   );
 
   // ----- Screen share with real feedback -----
+  // Phones whose browser has no screen-capture API get "present a photo"
+  // instead: the picked image is drawn to a canvas whose stream is published
+  // as the screen-share track, so it fills the presentation stage for
+  // everyone — documents, whiteboard photos and slides work from any phone.
   const [shareBusy, setShareBusy] = useState(false);
+  const photoShare = useRef<{
+    track: MediaStreamTrack;
+    timer: ReturnType<typeof setInterval>;
+  } | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  const stopPhotoShare = useCallback(async () => {
+    const p = photoShare.current;
+    if (!p) return;
+    photoShare.current = null;
+    clearInterval(p.timer);
+    try {
+      await localParticipant?.unpublishTrack(p.track);
+    } catch {
+      /* already gone */
+    }
+    p.track.stop();
+  }, [localParticipant]);
+
+  // Never leave a canvas track published after leaving the call.
+  useEffect(() => () => void stopPhotoShare(), [stopPhotoShare]);
+
+  const presentPhoto = useCallback(
+    async (file: File) => {
+      if (!localParticipant) return;
+      setShareBusy(true);
+      const url = URL.createObjectURL(file);
+      try {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const i = new Image();
+          i.onload = () => resolve(i);
+          i.onerror = reject;
+          i.src = url;
+        });
+        const scale = Math.min(1, 1920 / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(2, Math.round(img.width * scale));
+        canvas.height = Math.max(2, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d")!;
+        const draw = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        draw();
+        const stream = canvas.captureStream(2);
+        const track = stream.getVideoTracks()[0];
+        if (!track) throw new Error("captureStream unsupported");
+        await localParticipant.publishTrack(track, {
+          source: Track.Source.ScreenShare,
+          name: "photo-presentation",
+        });
+        // Repaint at 1fps so late joiners still receive frames of a static
+        // image (captureStream only emits when the canvas changes).
+        const timer = setInterval(draw, 1000);
+        photoShare.current = { track, timer };
+        notify("Presenting your photo — tap Stop to end.");
+      } catch (e) {
+        console.error("photo presenting error:", e);
+        notify("Couldn't present that image on this device.");
+      } finally {
+        URL.revokeObjectURL(url);
+        setShareBusy(false);
+      }
+    },
+    [localParticipant, notify]
+  );
+
   const toggleShare = useCallback(async () => {
     if (!localParticipant || shareBusy) return;
-    // Screen capture support on phones is browser-specific: recent real
-    // Chrome on Android has it; WebViews (links opened inside WhatsApp,
-    // Instagram, Teams, …), Samsung Internet and all iOS browsers don't.
-    // Say precisely which case this is instead of a generic "can't".
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      const ua = navigator.userAgent;
-      const inAppBrowser = /\bwv\b|FBAN|FBAV|Instagram|Line\/|WhatsApp|GSA\//i.test(ua);
-      const iOS = /iPhone|iPad|iPod/i.test(ua);
-      notify(
-        inAppBrowser
-          ? "You're inside another app's built-in browser — open this link directly in Chrome to share your screen."
-          : iOS
-            ? "iPhone/iPad browsers don't allow screen sharing — join from a computer to present."
-            : "This browser doesn't offer screen sharing. Update Chrome to the latest version and reopen the meeting."
-      );
+
+    // Stop whichever kind of presentation is running.
+    if (photoShare.current) {
+      await stopPhotoShare();
       return;
     }
+    if (isScreenShareEnabled) {
+      setShareBusy(true);
+      try {
+        await localParticipant.setScreenShareEnabled(false);
+      } finally {
+        setShareBusy(false);
+      }
+      return;
+    }
+
+    // No capture API (phones, in-app browsers): offer photo presenting.
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      photoInputRef.current?.click();
+      return;
+    }
+
     setShareBusy(true);
     try {
-      await localParticipant.setScreenShareEnabled(!isScreenShareEnabled, {
+      await localParticipant.setScreenShareEnabled(true, {
         audio: true,
         selfBrowserSurface: "include",
       });
@@ -302,16 +377,20 @@ export default function TeamsCall({
       const err = e as DOMException;
       if (err?.name !== "NotAllowedError") {
         console.error("screen share error:", e);
-        // Surface the reason (e.g. NotSupportedError, NotReadableError) so a
-        // field report tells us what actually happened on that device.
         notify(
-          `Couldn't start screen sharing${err?.name ? ` (${err.name})` : ""}. If this is a phone, make sure Chrome is up to date.`
+          `Couldn't start screen sharing${err?.name ? ` (${err.name})` : ""}. You can present a photo instead from the Share button.`
         );
       }
     } finally {
       setShareBusy(false);
     }
-  }, [localParticipant, isScreenShareEnabled, shareBusy, notify]);
+  }, [
+    localParticipant,
+    isScreenShareEnabled,
+    shareBusy,
+    notify,
+    stopPhotoShare,
+  ]);
 
   // ----- Spotlight: everyone sees one person big -----
   const [spotlight, setSpotlight] = useState<string | null>(null);
@@ -484,7 +563,9 @@ export default function TeamsCall({
               />
             </div>
             <div className="leading-tight min-w-0">
-              <div className="text-sm font-semibold leading-tight">Meeting</div>
+              <div className="text-sm font-semibold leading-tight truncate">
+                {title || "Meeting"}
+              </div>
               <div className="text-xs text-gray-400 font-mono truncate">
                 {room}
               </div>
@@ -653,8 +734,8 @@ export default function TeamsCall({
             <button
               onClick={toggleShare}
               disabled={shareBusy}
-              aria-label="Share screen"
-              title="Share screen"
+              aria-label="Share screen or present a photo"
+              title="Share your screen (on phones: present a photo)"
               className={ctrlBtn(isScreenShareEnabled) + " disabled:opacity-50"}
             >
               <ShareIcon />
@@ -662,6 +743,17 @@ export default function TeamsCall({
                 {shareBusy ? "…" : isScreenShareEnabled ? "Stop" : "Share"}
               </span>
             </button>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) presentPhoto(f);
+                e.target.value = "";
+              }}
+            />
 
             <ReactionButton />
 
