@@ -274,12 +274,20 @@ export default function TeamsCall({
   const [shareBusy, setShareBusy] = useState(false);
   const toggleShare = useCallback(async () => {
     if (!localParticipant || shareBusy) return;
-    // Phone browsers don't expose screen capture (only native apps can, via
-    // MediaProjection/ReplayKit). Keep the button and explain, rather than
-    // silently hiding a feature people look for.
+    // Screen capture support on phones is browser-specific: recent real
+    // Chrome on Android has it; WebViews (links opened inside WhatsApp,
+    // Instagram, Teams, …), Samsung Internet and all iOS browsers don't.
+    // Say precisely which case this is instead of a generic "can't".
     if (!navigator.mediaDevices?.getDisplayMedia) {
+      const ua = navigator.userAgent;
+      const inAppBrowser = /\bwv\b|FBAN|FBAV|Instagram|Line\/|WhatsApp|GSA\//i.test(ua);
+      const iOS = /iPhone|iPad|iPod/i.test(ua);
       notify(
-        "Phones can't share their screen from a browser — join from a laptop or desktop to present. You can still watch what others share."
+        inAppBrowser
+          ? "You're inside another app's built-in browser — open this link directly in Chrome to share your screen."
+          : iOS
+            ? "iPhone/iPad browsers don't allow screen sharing — join from a computer to present."
+            : "This browser doesn't offer screen sharing. Update Chrome to the latest version and reopen the meeting."
       );
       return;
     }
@@ -291,9 +299,14 @@ export default function TeamsCall({
       });
     } catch (e) {
       // Cancelling the picker throws NotAllowedError — that's not a failure.
-      if ((e as DOMException)?.name !== "NotAllowedError") {
+      const err = e as DOMException;
+      if (err?.name !== "NotAllowedError") {
         console.error("screen share error:", e);
-        notify("Couldn't share the screen in this browser.");
+        // Surface the reason (e.g. NotSupportedError, NotReadableError) so a
+        // field report tells us what actually happened on that device.
+        notify(
+          `Couldn't start screen sharing${err?.name ? ` (${err.name})` : ""}. If this is a phone, make sure Chrome is up to date.`
+        );
       }
     } finally {
       setShareBusy(false);
