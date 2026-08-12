@@ -35,6 +35,14 @@ export default function MeetingRoom({
   // True once the room actually connected — separates "couldn't join" from
   // mid-call hiccups, which must never dump an active call onto an error page.
   const everConnected = useRef(false);
+  // Bumped for every join attempt and used as the LiveKitRoom key, so each
+  // attempt gets a brand-new Room object instead of reusing a half-torn-down
+  // one from the session we just left.
+  const [joinAttempt, setJoinAttempt] = useState(0);
+  // Rejoining straight after leaving can hit the camera/mic before the old
+  // session released them ("NotReadableError: device in use"). One silent
+  // retry clears that race; only a second failure is worth an error screen.
+  const retriedRef = useRef(false);
   const [choices, setChoices] = useState<LocalUserChoices | null>(null);
   const [token, setToken] = useState<string>("");
   const [serverUrl, setServerUrl] = useState<string>("");
@@ -131,21 +139,33 @@ export default function MeetingRoom({
     []
   );
 
+  /**
+   * Fetches a fresh token and enters the room. Used by the pre-join screen,
+   * by Rejoin after leaving, and by Try again after a failed connect — all of
+   * which need a clean Room instance rather than a recycled one.
+   */
+  const connect = useCallback(async () => {
+    everConnected.current = false; // fresh join, fresh error semantics
+    retriedRef.current = false;
+    setPhase("connecting");
+    setError(null);
+    try {
+      const { ok, data } = await requestToken();
+      const next = applyTokenResult(ok, data);
+      if (next === "in-call") setJoinAttempt((n) => n + 1);
+      setPhase(next);
+    } catch {
+      setError("Network error while joining.");
+      setPhase("error");
+    }
+  }, [requestToken, applyTokenResult]);
+
   const handlePreJoinSubmit = useCallback(
     async (values: LocalUserChoices) => {
       setChoices(values);
-      everConnected.current = false; // fresh join, fresh error semantics
-      setPhase("connecting");
-      setError(null);
-      try {
-        const { ok, data } = await requestToken();
-        setPhase(applyTokenResult(ok, data));
-      } catch {
-        setError("Network error while joining.");
-        setPhase("error");
-      }
+      await connect();
     },
-    [requestToken, applyTokenResult]
+    [connect]
   );
 
   // Denied guest asks to join again — reset our request to "waiting" so the
@@ -273,9 +293,12 @@ export default function MeetingRoom({
         body={error || "Unknown error."}
         actions={
           <>
-            <PrimaryBtn onClick={() => setPhase("prejoin")}>
-              Try again
-            </PrimaryBtn>
+            {/* Reconnect directly — going back through pre-join would grab the
+                camera a second time and can retrigger a device-busy error. */}
+            <PrimaryBtn onClick={connect}>Try again</PrimaryBtn>
+            <SecondaryBtn onClick={() => setPhase("prejoin")}>
+              Change devices
+            </SecondaryBtn>
             <SecondaryBtn onClick={() => router.push("/dashboard")}>
               Dashboard
             </SecondaryBtn>
@@ -293,7 +316,8 @@ export default function MeetingRoom({
         body="Thanks for joining."
         actions={
           <>
-            <PrimaryBtn onClick={() => setPhase("prejoin")}>Rejoin</PrimaryBtn>
+            {/* Straight back in with the devices already chosen. */}
+            <PrimaryBtn onClick={connect}>Rejoin</PrimaryBtn>
             <SecondaryBtn onClick={() => router.push("/dashboard")}>
               Back to dashboard
             </SecondaryBtn>
@@ -307,6 +331,9 @@ export default function MeetingRoom({
   return (
     <div data-lk-theme="default" className="h-dvh bg-teams-dark">
       <LiveKitRoom
+        // A new key per attempt forces a fresh Room; reusing the instance
+        // from the session we just left is what made "Rejoin" fail.
+        key={joinAttempt}
         token={token}
         serverUrl={serverUrl}
         connect={true}
@@ -316,37 +343,44 @@ export default function MeetingRoom({
         onConnected={() => {
           everConnected.current = true;
         }}
-        onDisconnected={async (reason) => {
-          // Pressing Leave (or being removed) ends the call normally. A
-          // network drop instead rejoins automatically, like Teams — the
-          // person shouldn't land on an end screen because a lift or a dead
-          // spot ate their connection for a few seconds.
-          if (
-            reason === DisconnectReason.CLIENT_INITIATED ||
-            reason === DisconnectReason.PARTICIPANT_REMOVED ||
-            reason === DisconnectReason.DUPLICATE_IDENTITY ||
-            !everConnected.current
-          ) {
+        onDisconnected={(reason) => {
+          // Only a genuine network drop should rejoin by itself. Everything
+          // else — Leave, being removed, signing in elsewhere, or a reason we
+          // don't recognise — ends the call, so the button always wins.
+          const dropped =
+            everConnected.current &&
+            (reason === DisconnectReason.SERVER_SHUTDOWN ||
+              reason === DisconnectReason.STATE_MISMATCH ||
+              reason === DisconnectReason.SIGNAL_CLOSE ||
+              reason === DisconnectReason.JOIN_FAILURE);
+          if (!dropped) {
             setPhase("left");
             return;
           }
-          setPhase("connecting");
-          try {
-            const { ok, data } = await requestToken();
-            setPhase(applyTokenResult(ok, data));
-          } catch {
-            setPhase("left");
-          }
+          // Reconnect through the normal path so it gets a fresh Room too.
+          connect();
         }}
         onError={(e) => {
           // Once connected, transient errors are LiveKit's to recover from
           // (it reconnects itself; the in-call toast shows the state). Only a
           // failure to join at all deserves the error screen.
           console.error("livekit error:", e);
-          if (!everConnected.current) {
-            setError(e.message);
-            setPhase("error");
+          if (everConnected.current) return;
+
+          // First failure on a join is usually the camera/mic still held by
+          // the session we just left — remount once after a beat instead of
+          // showing an error the user can do nothing useful with.
+          if (!retriedRef.current) {
+            retriedRef.current = true;
+            setTimeout(() => setJoinAttempt((n) => n + 1), 900);
+            return;
           }
+          setError(
+            /not ?readable|in use|could not start/i.test(e.message)
+              ? "Your camera or microphone is still in use. Close other tabs or apps using it, then try again."
+              : e.message
+          );
+          setPhase("error");
         }}
         style={{ height: "100%" }}
       >
