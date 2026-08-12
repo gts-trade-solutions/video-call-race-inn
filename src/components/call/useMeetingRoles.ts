@@ -63,7 +63,16 @@ export function useMeetingRoles(
       if (!res.ok) return;
       const d = await res.json();
       if (typeof d.ownerIdentity === "string") setOwnerIdentity(d.ownerIdentity);
-      if (Array.isArray(d.coHostIdentities)) setCoHosts(d.coHostIdentities);
+      if (Array.isArray(d.coHostIdentities)) {
+        // Replacing the array every poll would re-render the whole call —
+        // every tile included — several times a minute for no reason.
+        setCoHosts((prev) =>
+          prev.length === d.coHostIdentities.length &&
+          prev.every((v, i) => v === d.coHostIdentities[i])
+            ? prev
+            : d.coHostIdentities
+        );
+      }
       setIsOwner(!!d.isOwner);
       setCanManage(!!d.canManage);
     } catch {

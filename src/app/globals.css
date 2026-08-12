@@ -54,6 +54,18 @@ body {
   }
 }
 
+/* Kill the browser's wait-and-see delay before firing a tap (it holds the
+   event back in case a double-tap-to-zoom follows) and the grey flash that
+   makes taps feel even slower. */
+button,
+a,
+[role="button"],
+input[type="range"],
+select {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* Floating emoji reactions rise + fade */
 @keyframes reaction-rise {
   0% {
@@ -123,45 +135,30 @@ body {
   }
 }
 
-/* Pulsing glow around the speaking tile — unmissable, like Teams. */
-@keyframes speak-glow {
+/* Pulsing outline around the speaking tile — unmissable, like Teams.
+   The shadow itself is static and only opacity animates: animating
+   box-shadow repaints the tile every frame, which visibly janks a phone
+   that is already decoding several video streams. */
+.speak-outline {
+  box-shadow: inset 0 0 0 3px rgb(139 145 240 / 0.95);
+  animation: speak-fade 1.4s ease-in-out infinite;
+  will-change: opacity;
+}
+@keyframes speak-fade {
   0%,
   100% {
-    box-shadow: 0 0 0 3px rgb(139 145 240 / 0.9), 0 0 14px rgb(139 145 240 / 0.55);
+    opacity: 1;
   }
   50% {
-    box-shadow: 0 0 0 3px rgb(139 145 240 / 0.55), 0 0 6px rgb(139 145 240 / 0.3);
+    opacity: 0.45;
   }
-}
-.speaking-glow {
-  animation: speak-glow 1.4s ease-in-out infinite;
-}
-/* Flush (edge-to-edge) tiles glow inward so the seamless grid stays intact. */
-@keyframes speak-glow-inset {
-  0%,
-  100% {
-    box-shadow: inset 0 0 0 3px rgb(139 145 240 / 0.95);
-  }
-  50% {
-    box-shadow: inset 0 0 0 3px rgb(139 145 240 / 0.5);
-  }
-}
-.speaking-glow-inset {
-  animation: speak-glow-inset 1.4s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .speak-bars span,
-  .speaking-glow,
-  .speaking-glow-inset {
+  .speak-outline {
     animation-duration: 0.01ms;
     animation-iteration-count: 1;
-  }
-  .speaking-glow {
-    box-shadow: 0 0 0 3px rgb(139 145 240 / 0.9);
-  }
-  .speaking-glow-inset {
-    box-shadow: inset 0 0 0 3px rgb(139 145 240 / 0.95);
   }
 }
 

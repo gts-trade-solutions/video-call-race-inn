@@ -484,7 +484,15 @@ export default function TeamsCall({
       if (res.ok) {
         const d = await res.json();
         const list: WaitingPerson[] = Array.isArray(d.waiting) ? d.waiting : [];
-        setWaiting(list.filter((p) => !decidedRef.current.has(p.userId)));
+        const next = list.filter((p) => !decidedRef.current.has(p.userId));
+        // Usually nobody is waiting; keeping the same array avoids re-rendering
+        // the entire call (every tile included) every few seconds.
+        setWaiting((prev) =>
+          prev.length === next.length &&
+          prev.every((p, i) => p.userId === next[i].userId)
+            ? prev
+            : next
+        );
       }
     } catch {
       /* ignore transient errors */
@@ -752,7 +760,7 @@ export default function TeamsCall({
             hideChrome || railMode ? "hidden" : "flex"
           }`}
         >
-          <div className="flex flex-wrap items-center justify-center gap-1.5 bg-teams-stage/95 backdrop-blur rounded-2xl px-2 sm:px-3 py-2 shadow-2xl border border-white/10 max-w-full">
+          <div className="flex flex-wrap items-center justify-center gap-1.5 bg-teams-stage/95 rounded-2xl px-2 sm:px-3 py-2 shadow-2xl border border-white/10 max-w-full">
             <TrackToggle
               source={Track.Source.Microphone}
               showIcon={false}
@@ -1704,19 +1712,23 @@ function Tile({
         // Flush tiles keep the speaking indicator inside their box so the
         // edge-to-edge grid stays perfectly seamless.
         flush ? "rounded-none ring-inset" : "rounded-xl"
-      } ${
-        spotlighted
-          ? "ring-teams-purple"
-          : isSpeaking
-          ? `ring-transparent ${flush ? "speaking-glow-inset" : "speaking-glow"}`
-          : "ring-transparent"
-      }`}
+      } ${spotlighted ? "ring-teams-purple" : "ring-transparent"}`}
     >
+      {/* Speaking outline as its own layer: only its opacity animates, so the
+          tile underneath is never repainted. */}
+      {isSpeaking && !spotlighted && (
+        <span
+          aria-hidden
+          className={`speak-outline pointer-events-none absolute inset-0 z-10 ${
+            flush ? "" : "rounded-xl"
+          }`}
+        />
+      )}
       {/* Teams-mobile-style mute badge in the top corner of flush tiles. */}
       {flush && micMuted && (
         <span
           title={`${name} is muted`}
-          className="absolute top-2 left-2 z-10 w-9 h-9 rounded-full bg-black/35 backdrop-blur-sm flex items-center justify-center text-white"
+          className="absolute top-2 left-2 z-10 w-9 h-9 rounded-full bg-black/55 flex items-center justify-center text-white"
         >
           <MicOffIcon />
         </span>

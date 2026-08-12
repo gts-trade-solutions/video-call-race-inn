@@ -36,7 +36,7 @@ export function Toasts({ items }: { items: Toast[] }) {
       {items.map((t) => (
         <div
           key={t.id}
-          className="bg-teams-stage/95 backdrop-blur border border-white/15 text-white text-sm rounded-lg px-3 py-2 shadow-xl text-center"
+          className="bg-teams-stage/95 border border-white/15 text-white text-sm rounded-lg px-3 py-2 shadow-xl text-center"
         >
           {t.text}
         </div>
