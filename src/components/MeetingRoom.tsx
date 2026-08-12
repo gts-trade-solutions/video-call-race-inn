@@ -75,15 +75,46 @@ export default function MeetingRoom({
   );
 
   const roomOptions = useMemo<RoomOptions>(() => {
+    // Capture 1080p on a computer, 720p on phones — a phone encoding 1080p
+    // while also running background blur drops frames and ends up looking
+    // worse than a clean 720p.
+    const onPhone =
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 639px), (hover: none)").matches;
+
     return {
       adaptiveStream: true,
       dynacast: true,
       videoCaptureDefaults: {
         deviceId: choices?.videoDeviceId ?? undefined,
-        resolution: VideoPresets.h720.resolution,
+        resolution: onPhone
+          ? VideoPresets.h720.resolution
+          : VideoPresets.h1080.resolution,
       },
       audioCaptureDefaults: {
         deviceId: choices?.audioDeviceId ?? undefined,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      publishDefaults: {
+        // Full-size tiles get the top layer; simulcast keeps thumbnails and
+        // weak connections cheap, so raising this doesn't punish anyone.
+        videoEncoding: onPhone
+          ? VideoPresets.h720.encoding
+          : VideoPresets.h1080.encoding,
+        videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+        // Shared screens are mostly text. 2.5 Mbps (the default) smears small
+        // type, and dropping resolution under load is exactly the wrong
+        // trade-off here — losing frames is far better than losing legibility.
+        screenShareEncoding: {
+          maxBitrate: 5_000_000,
+          maxFramerate: 15,
+          priority: "high",
+        },
+        degradationPreference: "maintain-resolution",
+        red: true,
+        dtx: true,
       },
     };
   }, [choices]);

@@ -24,7 +24,12 @@ import {
   type TrackReference,
   type TrackReferenceOrPlaceholder,
 } from "@livekit/components-react";
-import { Track, type Participant, type LocalVideoTrack } from "livekit-client";
+import {
+  ScreenSharePresets,
+  Track,
+  type Participant,
+  type LocalVideoTrack,
+} from "livekit-client";
 import { Toasts, useToasts } from "@/components/call/Toasts";
 import EffectsPanel from "@/components/call/EffectsPanel";
 import { useVideoEffects } from "@/components/call/useVideoEffects";
@@ -363,6 +368,8 @@ export default function TeamsCall({
         const stream = canvas.captureStream(2);
         const track = stream.getVideoTracks()[0];
         if (!track) throw new Error("captureStream unsupported");
+        // A presented document is text — keep the encoder from smoothing it.
+        track.contentHint = "detail";
         await localParticipant.publishTrack(track, {
           source: Track.Source.ScreenShare,
           name: "photo-presentation",
@@ -413,6 +420,12 @@ export default function TeamsCall({
       await localParticipant.setScreenShareEnabled(true, {
         audio: true,
         selfBrowserSurface: "include",
+        surfaceSwitching: "include",
+        // 'detail' tells the encoder this is text/UI, not video: it keeps
+        // edges crisp instead of smoothing them, which is the difference
+        // between readable and unreadable small type on a shared slide.
+        contentHint: "detail",
+        resolution: ScreenSharePresets.h1080fps15.resolution,
       });
     } catch (e) {
       // Cancelling the picker throws NotAllowedError — that's not a failure.
