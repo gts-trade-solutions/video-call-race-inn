@@ -32,9 +32,12 @@ const BLUR_RADIUS = 12;
 // Serve the segmentation model + WASM from our own origin. The defaults hit
 // jsdelivr + storage.googleapis.com at runtime; if those are blocked the
 // processor still starts but renders BLACK FRAMES instead of video.
+// The *landscape* selfie segmenter is tuned for 16:9 webcam frames — visibly
+// cleaner person/background edges (hair, shoulders, second person in frame)
+// and cheaper per frame than the square general-purpose model.
 const ASSET_PATHS = {
   tasksVisionFileSet: "/mediapipe/wasm",
-  modelAssetPath: "/mediapipe/selfie_segmenter.tflite",
+  modelAssetPath: "/mediapipe/selfie_segmenter_landscape.tflite",
 };
 
 const STORAGE_KEY = "vc-video-effect";
