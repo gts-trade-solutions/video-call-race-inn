@@ -1,11 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createLocalVideoTrack, type LocalVideoTrack } from "livekit-client";
 import { useMediaDeviceSelect } from "@livekit/components-react";
-import type { BackgroundProcessorWrapper } from "@livekit/track-processors";
 import {
-  applyEffectToTrack,
   effectKey,
   useCameraBrightness,
   type UseCameraBrightness,
@@ -14,25 +11,24 @@ import {
 } from "./useVideoEffects";
 
 /**
- * The Teams "Video effects and settings" panel: None / Blur / background
- * gallery / Add new, with a private live preview and an Apply button.
+ * Background and camera settings.
  *
- * The preview runs on its own camera track that is never published — exactly
- * like Teams' "Others won't see your video while you preview."
+ * Choices apply to the live camera the moment they're tapped — there is no
+ * separate preview stream. The earlier preview opened a *second* camera
+ * capture and ran a *second* segmentation pipeline, which made switching slow
+ * and failed outright on devices that only allow one camera consumer. You see
+ * the result in your own tile instead, which is just as immediate.
  */
 
-/** Built-in scenes shipped in /public/backgrounds. */
+/**
+ * The bundled backgrounds. To change them, drop the artwork in
+ * `public/backgrounds/` under these names — a slot whose file is missing
+ * simply doesn't render, so nothing looks broken before they're added.
+ */
 const BUILT_IN = [
-  { src: "/backgrounds/office.svg", label: "Office" },
-  { src: "/backgrounds/studio.svg", label: "Studio" },
-  { src: "/backgrounds/loft.svg", label: "Loft" },
-  { src: "/backgrounds/library.svg", label: "Library" },
-  { src: "/backgrounds/forest.svg", label: "Forest" },
-  { src: "/backgrounds/ocean.svg", label: "Ocean" },
-  { src: "/backgrounds/sunset.svg", label: "Sunset" },
-  { src: "/backgrounds/city-night.svg", label: "City at night" },
-  { src: "/backgrounds/abstract-purple.svg", label: "Purple waves" },
-  { src: "/backgrounds/abstract-slate.svg", label: "Slate waves" },
+  { src: "/backgrounds/bg-1.jpg", label: "Background 1" },
+  { src: "/backgrounds/bg-2.jpg", label: "Background 2" },
+  { src: "/backgrounds/bg-3.jpg", label: "Background 3" },
 ];
 
 const CUSTOM_KEY = "vc-custom-backgrounds";
@@ -80,69 +76,19 @@ export default function EffectsPanel({
 }) {
   const [tab, setTab] = useState<"effects" | "settings">("effects");
   const brightness = useCameraBrightness();
-  const [selection, setSelection] = useState<VideoEffect>(effects.effect);
   const [custom, setCustom] = useState<string[]>([]);
-  const [applying, setApplying] = useState(false);
+  const [missing, setMissing] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setCustom(loadCustom()), []);
 
-  // ----- Private preview track -----
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const previewTrackRef = useRef<LocalVideoTrack | null>(null);
-  const previewProcRef = useRef<BackgroundProcessorWrapper | null>(null);
-  const previewAttachedRef = useRef<LocalVideoTrack | null>(null);
-  const [previewState, setPreviewState] = useState<"loading" | "on" | "failed">(
-    "loading"
+  const choose = useCallback(
+    async (e: VideoEffect) => {
+      const ok = await effects.apply(e);
+      if (!ok) onNotice("Couldn't start that effect on this device.");
+    },
+    [effects, onNotice]
   );
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const track = await createLocalVideoTrack({
-          resolution: { width: 640, height: 360 },
-        });
-        if (cancelled) {
-          track.stop();
-          return;
-        }
-        previewTrackRef.current = track;
-        if (videoRef.current) track.attach(videoRef.current);
-        brightness.applyTo(track); // preview matches the live brightness
-        setPreviewState("on");
-      } catch {
-        // No second camera handle (in use / denied) — selection still works,
-        // the user just applies without a preview.
-        if (!cancelled) setPreviewState("failed");
-      }
-    })();
-    return () => {
-      cancelled = true;
-      const t = previewTrackRef.current;
-      if (t) {
-        t.stopProcessor().catch(() => {});
-        t.detach();
-        t.stop();
-      }
-      previewTrackRef.current = null;
-      previewProcRef.current = null;
-      previewAttachedRef.current = null;
-    };
-  }, []);
-
-  // Mirror the current selection onto the preview track.
-  useEffect(() => {
-    const track = previewTrackRef.current;
-    if (previewState !== "on" || !track) return;
-    applyEffectToTrack(track, selection, previewProcRef, previewAttachedRef);
-  }, [selection, previewState]);
-
-  // Keep the preview at the same brightness as the live camera.
-  useEffect(() => {
-    const track = previewTrackRef.current;
-    if (previewState === "on" && track) brightness.applyTo(track);
-  }, [brightness.value, brightness, previewState]);
 
   const addCustom = useCallback(
     async (file: File) => {
@@ -155,12 +101,12 @@ export default function EffectsPanel({
         } catch {
           onNotice("Couldn't save the image for next time (storage is full).");
         }
-        setSelection({ mode: "image", src: dataUrl });
+        choose({ mode: "image", src: dataUrl });
       } catch {
         onNotice("Couldn't read that image.");
       }
     },
-    [custom, onNotice]
+    [custom, onNotice, choose]
   );
 
   const removeCustom = useCallback(
@@ -172,30 +118,18 @@ export default function EffectsPanel({
       } catch {
         /* ignore */
       }
-      setSelection((sel) =>
-        sel.mode === "image" && sel.src === src ? { mode: "none" } : sel
-      );
+      if (effectKey(effects.effect) === `image:${src}`) choose({ mode: "none" });
     },
-    [custom]
+    [custom, effects.effect, choose]
   );
 
-  async function applySelection() {
-    setApplying(true);
-    const ok = await effects.apply(selection);
-    setApplying(false);
-    if (!ok) {
-      setSelection({ mode: "none" });
-      onNotice("Couldn't start that effect on this device.");
-    }
-  }
-
-  const dirty = effectKey(selection) !== effectKey(effects.effect);
-  const selKey = effectKey(selection);
+  const selKey = effectKey(effects.effect);
+  const bundled = BUILT_IN.filter((b) => !missing.includes(b.src));
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {/* ---- Tabs (Teams-style: Video effects | Settings) ---- */}
-      <div className="flex gap-1 px-3 pt-2 border-b border-white/10">
+      {/* ---- Tabs ---- */}
+      <div className="flex gap-1 px-3 pt-2 border-b border-white/10 shrink-0">
         {(["effects", "settings"] as const).map((t) => (
           <button
             key={t}
@@ -206,125 +140,103 @@ export default function EffectsPanel({
                 : "border-transparent text-gray-400 hover:text-white"
             }`}
           >
-            {t === "effects" ? "Video effects" : "Settings"}
+            {t === "effects" ? "Background" : "Settings"}
           </button>
         ))}
+        {effects.busy && (
+          <span className="ml-auto self-center text-xs text-gray-400">
+            Applying…
+          </span>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
-        {/* ---- Preview (shared by both tabs) ---- */}
-        <div className="rounded-lg overflow-hidden bg-black aspect-video mb-2 relative">
-          <video
-            ref={videoRef}
-            muted
-            playsInline
-            autoPlay
-            className="w-full h-full object-cover -scale-x-100"
-          />
-          {previewState !== "on" && (
-            <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-400 px-4 text-center">
-              {previewState === "loading"
-                ? "Starting preview…"
-                : "Preview unavailable — changes will still apply to your video."}
-            </div>
-          )}
-        </div>
-        <p className="text-[11px] text-gray-400 mb-3 flex items-center gap-1.5">
-          <InfoIcon />
-          Others won&apos;t see your video while you preview.
-        </p>
-
         {tab === "settings" ? (
           <SettingsTab brightness={brightness} />
         ) : !effects.supported ? (
           <p className="text-sm text-gray-400">
-            Video effects aren&apos;t supported in this browser. Try a recent
+            Backgrounds aren&apos;t supported in this browser. Try a recent
             Chrome or Edge.
           </p>
         ) : (
-          <EffectsTab />
+          <>
+            <p className="text-[11px] text-gray-400 mb-2">
+              Tap to apply — everyone sees the change straight away.
+            </p>
+
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              <EffectTile
+                selected={selKey === "none"}
+                onClick={() => choose({ mode: "none" })}
+                label="None"
+              >
+                <NoneIcon />
+              </EffectTile>
+              <EffectTile
+                selected={selKey === "blur"}
+                onClick={() => choose({ mode: "blur" })}
+                label="Blur"
+              >
+                <BlurGlyph />
+              </EffectTile>
+              <EffectTile
+                selected={false}
+                onClick={() => fileRef.current?.click()}
+                label="Add new"
+              >
+                <UploadIcon />
+              </EffectTile>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="absolute w-px h-px opacity-0 pointer-events-none -z-10"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) addCustom(f);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              {custom.map((src) => (
+                <ImageTile
+                  key={src.slice(-24)}
+                  src={src}
+                  label="Your background"
+                  selected={selKey === `image:${src}`}
+                  onClick={() => choose({ mode: "image", src })}
+                  onRemove={() => removeCustom(src)}
+                />
+              ))}
+              {bundled.map((bg) => (
+                <ImageTile
+                  key={bg.src}
+                  src={bg.src}
+                  label={bg.label}
+                  selected={selKey === `image:${bg.src}`}
+                  onClick={() => choose({ mode: "image", src: bg.src })}
+                  onMissing={() =>
+                    setMissing((m) => (m.includes(bg.src) ? m : [...m, bg.src]))
+                  }
+                />
+              ))}
+            </div>
+
+            {bundled.length === 0 && custom.length === 0 && (
+              <p className="text-xs text-gray-400 mt-3 leading-snug">
+                No background images yet. Use <b>Add new</b> to pick one from
+                this device, or drop three files into{" "}
+                <code className="text-gray-300">public/backgrounds/</code> named
+                bg-1.jpg, bg-2.jpg and bg-3.jpg.
+              </p>
+            )}
+          </>
         )}
       </div>
-
-      {/* ---- Apply (effects tab only) ---- */}
-      {tab === "effects" && effects.supported && (
-        <div className="p-3 border-t border-white/10">
-          <button
-            onClick={applySelection}
-            disabled={!dirty || applying || effects.busy}
-            className="w-full bg-teams-purple hover:bg-teams-purpleDark disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg py-2.5 transition"
-          >
-            {applying ? "Applying…" : dirty ? "Apply" : "Applied ✓"}
-          </button>
-        </div>
-      )}
     </div>
   );
-
-  function EffectsTab() {
-    return (
-      <>
-        {/* ---- None / Blur / Add new ---- */}
-        <div className="grid grid-cols-3 gap-2 mb-2">
-          <EffectTile
-            selected={selKey === "none"}
-            onClick={() => setSelection({ mode: "none" })}
-            label="None"
-          >
-            <NoneIcon />
-          </EffectTile>
-          <EffectTile
-            selected={selKey === "blur"}
-            onClick={() => setSelection({ mode: "blur" })}
-            label="Blur"
-          >
-            <BlurGlyph />
-          </EffectTile>
-          <EffectTile
-            selected={false}
-            onClick={() => fileRef.current?.click()}
-            label="Add new"
-          >
-            <UploadIcon />
-          </EffectTile>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) addCustom(f);
-              e.target.value = "";
-            }}
-          />
-        </div>
-
-        {/* ---- Backgrounds ---- */}
-        <div className="grid grid-cols-3 gap-2">
-          {custom.map((src) => (
-            <ImageTile
-              key={src.slice(-24)}
-              src={src}
-              label="Custom background"
-              selected={selKey === `image:${src}`}
-              onClick={() => setSelection({ mode: "image", src })}
-              onRemove={() => removeCustom(src)}
-            />
-          ))}
-          {BUILT_IN.map((bg) => (
-            <ImageTile
-              key={bg.src}
-              src={bg.src}
-              label={bg.label}
-              selected={selKey === `image:${bg.src}`}
-              onClick={() => setSelection({ mode: "image", src: bg.src })}
-            />
-          ))}
-        </div>
-      </>
-    );
-  }
 }
 
 /* ---------- Settings tab: devices + brightness ---------- */
@@ -440,12 +352,15 @@ function ImageTile({
   selected,
   onClick,
   onRemove,
+  onMissing,
 }: {
   src: string;
   label: string;
   selected: boolean;
   onClick: () => void;
   onRemove?: () => void;
+  /** Fired when the file isn't there, so the slot can be dropped. */
+  onMissing?: () => void;
 }) {
   return (
     <div className="relative group">
@@ -458,7 +373,12 @@ function ImageTile({
         )}`}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={label} className="w-full h-full object-cover" />
+        <img
+          src={src}
+          alt={label}
+          onError={onMissing}
+          className="w-full h-full object-cover"
+        />
       </button>
       {selected && (
         <span className="absolute top-1 left-1 w-4 h-4 rounded-full bg-teams-purple text-white text-[10px] flex items-center justify-center">
@@ -515,11 +435,5 @@ const SunIcon = ({ dim }: { dim?: boolean }) => (
   <svg {...I({ width: dim ? 13 : 17, height: dim ? 13 : 17 })}>
     <circle cx="12" cy="12" r="4" />
     <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-  </svg>
-);
-const InfoIcon = () => (
-  <svg {...I({ width: 13, height: 13 })}>
-    <circle cx="12" cy="12" r="9" />
-    <path d="M12 11v5M12 8h.01" />
   </svg>
 );

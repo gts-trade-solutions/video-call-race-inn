@@ -62,9 +62,12 @@ function newProcessor(e: VideoEffect): BackgroundProcessorWrapper {
 }
 
 /**
- * Applies `effect` to any LocalVideoTrack, reusing the processor in
- * `procRef`/`trackRef` when it is already attached to that same track. Shared
- * by the live camera and the panel's private preview track.
+ * Applies `effect` to a LocalVideoTrack.
+ *
+ * The processor is created once and then *switched* between modes — including
+ * to "disabled" for None. Tearing it down and rebuilding meant reloading the
+ * ~10 MB segmentation model on every change, which is what made switching
+ * backgrounds feel slow; switching in place is effectively instant.
  *
  * Returns false when the processor failed — the track is left unprocessed
  * (never black) in that case.
@@ -76,21 +79,17 @@ export async function applyEffectToTrack(
   trackRef: { current: LocalVideoTrack | null }
 ): Promise<boolean> {
   try {
-    if (effect.mode === "none") {
-      if (trackRef.current === track) {
-        await track.stopProcessor();
-        procRef.current = null;
-        trackRef.current = null;
-      }
-      return true;
-    }
+    // Already attached to this track: just switch modes, model stays loaded.
     if (procRef.current && trackRef.current === track) {
       await procRef.current.switchTo(livekitMode(effect));
-    } else {
-      procRef.current = newProcessor(effect);
-      trackRef.current = track;
-      await track.setProcessor(procRef.current);
+      return true;
     }
+    // Nothing attached and nothing to do.
+    if (effect.mode === "none") return true;
+
+    procRef.current = newProcessor(effect);
+    trackRef.current = track;
+    await track.setProcessor(procRef.current);
     return true;
   } catch (err) {
     console.error("video effect error:", err);
@@ -248,15 +247,24 @@ export function useVideoEffects(): UseVideoEffects {
     return (pub?.track as LocalVideoTrack | undefined) ?? undefined;
   }, [localParticipant]);
 
+  // Switching is async; tapping three backgrounds quickly would otherwise run
+  // three switches at once and leave whichever finished last on screen —
+  // sometimes not the one tapped. Each apply waits for the previous to settle.
+  const queueRef = useRef<Promise<unknown>>(Promise.resolve());
+
   const apply = useCallback(
     async (e: VideoEffect): Promise<boolean> => {
       setBusy(true);
-      try {
+      const run = queueRef.current.then(async () => {
         const track = camTrack();
         // Camera off: remember the choice; the effect lands when it turns on.
-        const ok = track
-          ? await applyEffectToTrack(track, e, procRef, attachedRef)
+        return track
+          ? applyEffectToTrack(track, e, procRef, attachedRef)
           : true;
+      });
+      queueRef.current = run.catch(() => {});
+      try {
+        const ok = await run;
         const next = ok ? e : ({ mode: "none" } as const);
         setEffect(next);
         try {
