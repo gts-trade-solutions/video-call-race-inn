@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SessionUser } from "@/lib/auth";
 import { Modal, ScheduleModal } from "@/components/meet/ScheduleModal";
+import { NOTE_TAKER_ENABLED } from "@/lib/features";
 
 type Meeting = {
   roomId: string;
@@ -285,26 +286,30 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
                     <CalIcon />
                     <span className="hidden sm:inline">Invite (.ics)</span>
                   </a>
-                  <a
-                    href={`/api/meetings/transcript?room=${encodeURIComponent(
-                      m.roomId
-                    )}&format=txt`}
-                    title="Download the notes captured by live captions"
-                    className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5 inline-flex items-center gap-1.5"
-                  >
-                    <NotesIcon />
-                    <span className="hidden sm:inline">Notes</span>
-                  </a>
-                  <a
-                    href={`/api/meetings/summary?room=${encodeURIComponent(
-                      m.roomId
-                    )}&format=md`}
-                    title="Download key points, decisions and action items"
-                    className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5 inline-flex items-center gap-1.5"
-                  >
-                    <SummaryIcon />
-                    <span className="hidden sm:inline">Summary</span>
-                  </a>
+                  {NOTE_TAKER_ENABLED && (
+                    <>
+                      <a
+                        href={`/api/meetings/transcript?room=${encodeURIComponent(
+                          m.roomId
+                        )}&format=txt`}
+                        title="Download the notes captured by live captions"
+                        className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5 inline-flex items-center gap-1.5"
+                      >
+                        <NotesIcon />
+                        <span className="hidden sm:inline">Notes</span>
+                      </a>
+                      <a
+                        href={`/api/meetings/summary?room=${encodeURIComponent(
+                          m.roomId
+                        )}&format=md`}
+                        title="Download key points, decisions and action items"
+                        className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5 inline-flex items-center gap-1.5"
+                      >
+                        <SummaryIcon />
+                        <span className="hidden sm:inline">Summary</span>
+                      </a>
+                    </>
+                  )}
                   <button
                     onClick={() => copy(m.roomId)}
                     className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5"

@@ -33,6 +33,7 @@ import {
 import Logo from "@/components/Logo";
 import { Toasts, useToasts } from "@/components/call/Toasts";
 import { CaptionOverlay, NotesPanel } from "@/components/call/CaptionsUI";
+import { NOTE_TAKER_ENABLED } from "@/lib/features";
 import { useLiveCaptions } from "@/components/call/useLiveCaptions";
 import EffectsPanel from "@/components/call/EffectsPanel";
 import { useVideoEffects } from "@/components/call/useVideoEffects";
@@ -707,7 +708,9 @@ export default function TeamsCall({
             )}
 
             {/* Subtitles sit over whatever layout is on screen. */}
-            {captions.anyoneCaptioning && <CaptionOverlay captions={captions} />}
+            {NOTE_TAKER_ENABLED && captions.anyoneCaptioning && (
+              <CaptionOverlay captions={captions} />
+            )}
           </main>
 
           {panel !== "none" && (
@@ -725,7 +728,7 @@ export default function TeamsCall({
                 >
                   <EffectsPanel effects={effects} onNotice={notify} />
                 </PanelShell>
-              ) : panel === "notes" ? (
+              ) : panel === "notes" && NOTE_TAKER_ENABLED ? (
                 <PanelShell
                   title="Meeting notes"
                   onClose={() => setPanel("none")}
@@ -902,18 +905,22 @@ export default function TeamsCall({
               </span>
             </button>
 
-            <button
-              onClick={() => setPanel(panel === "notes" ? "none" : "notes")}
-              aria-label="Live captions and meeting notes"
-              title="Live captions & notes"
-              className={ctrlBtn(panel === "notes" || captions.on) + " relative"}
-            >
-              <CaptionsIcon />
-              <span className="ctrl-label">Notes</span>
-              {captions.on && (
-                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-teams-purple ring-2 ring-teams-stage" />
-              )}
-            </button>
+            {NOTE_TAKER_ENABLED && (
+              <button
+                onClick={() => setPanel(panel === "notes" ? "none" : "notes")}
+                aria-label="Live captions and meeting notes"
+                title="Live captions & notes"
+                className={
+                  ctrlBtn(panel === "notes" || captions.on) + " relative"
+                }
+              >
+                <CaptionsIcon />
+                <span className="ctrl-label">Notes</span>
+                {captions.on && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-teams-purple ring-2 ring-teams-stage" />
+                )}
+              </button>
+            )}
 
             <button
               onClick={() => setPanel(panel === "chat" ? "none" : "chat")}
@@ -1084,14 +1091,16 @@ function ControlRail({
             >
               People ({participants})
             </RailMenuItem>
-            <RailMenuItem
-              onClick={() => {
-                onOpenPanel("notes");
-                setMoreOpen(false);
-              }}
-            >
-              Captions &amp; notes
-            </RailMenuItem>
+            {NOTE_TAKER_ENABLED && (
+              <RailMenuItem
+                onClick={() => {
+                  onOpenPanel("notes");
+                  setMoreOpen(false);
+                }}
+              >
+                Captions &amp; notes
+              </RailMenuItem>
+            )}
             <RailMenuItem
               onClick={() => {
                 onOpenPanel("effects");
