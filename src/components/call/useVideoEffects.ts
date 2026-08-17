@@ -5,9 +5,15 @@ import { useLocalParticipant } from "@livekit/components-react";
 import { Track, type LocalVideoTrack } from "livekit-client";
 import {
   BackgroundProcessor,
+  ProcessorWrapper,
   supportsBackgroundProcessors,
   type BackgroundProcessorWrapper,
 } from "@livekit/track-processors";
+import { PRIMARY_PERSON_ONLY } from "@/lib/features";
+import {
+  PrimaryPersonTransformer,
+  type PrimaryPersonOptions,
+} from "./primaryPersonTransformer";
 
 /**
  * Camera background effects: none / blur / virtual-background image — the
@@ -50,15 +56,52 @@ function livekitMode(e: VideoEffect) {
       : ({ mode: "disabled" } as const);
 }
 
-function newProcessor(e: VideoEffect): BackgroundProcessorWrapper {
+/**
+ * Either processor exposes the same two operations we need — attach to a track,
+ * and switch mode in place — so the rest of the file doesn't care which is in
+ * use. `switchTo` is normalised over the two different option shapes.
+ */
+export type EffectProcessor = {
+  wrapper: BackgroundProcessorWrapper | ProcessorWrapper<PrimaryPersonOptions>;
+  switchTo: (e: VideoEffect) => Promise<void>;
+};
+
+function ourOptions(e: VideoEffect): PrimaryPersonOptions {
+  return {
+    assetPaths: ASSET_PATHS,
+    ...(e.mode === "image"
+      ? { imagePath: e.src, disabled: false }
+      : e.mode === "blur"
+        ? { blurRadius: BLUR_RADIUS, imagePath: undefined, disabled: false }
+        : { disabled: true }),
+  };
+}
+
+function newProcessor(e: VideoEffect): EffectProcessor {
+  // Ours keeps only the main person sharp; LiveKit's keeps every person sharp.
+  if (PRIMARY_PERSON_ONLY) {
+    const transformer = new PrimaryPersonTransformer(ourOptions(e));
+    const wrapper = new ProcessorWrapper(transformer, "primary-person");
+    return {
+      wrapper,
+      switchTo: (next) => wrapper.updateTransformerOptions(ourOptions(next)),
+    };
+  }
+
   const base = { assetPaths: ASSET_PATHS };
-  return e.mode === "image"
-    ? BackgroundProcessor({ mode: "virtual-background", imagePath: e.src, ...base })
-    : BackgroundProcessor({
-        mode: "background-blur",
-        blurRadius: BLUR_RADIUS,
-        ...base,
-      });
+  const wrapper =
+    e.mode === "image"
+      ? BackgroundProcessor({
+          mode: "virtual-background",
+          imagePath: e.src,
+          ...base,
+        })
+      : BackgroundProcessor({
+          mode: "background-blur",
+          blurRadius: BLUR_RADIUS,
+          ...base,
+        });
+  return { wrapper, switchTo: (next) => wrapper.switchTo(livekitMode(next)) };
 }
 
 /**
@@ -75,21 +118,22 @@ function newProcessor(e: VideoEffect): BackgroundProcessorWrapper {
 export async function applyEffectToTrack(
   track: LocalVideoTrack,
   effect: VideoEffect,
-  procRef: { current: BackgroundProcessorWrapper | null },
+  procRef: { current: EffectProcessor | null },
   trackRef: { current: LocalVideoTrack | null }
 ): Promise<boolean> {
   try {
     // Already attached to this track: just switch modes, model stays loaded.
     if (procRef.current && trackRef.current === track) {
-      await procRef.current.switchTo(livekitMode(effect));
+      await procRef.current.switchTo(effect);
       return true;
     }
     // Nothing attached and nothing to do.
     if (effect.mode === "none") return true;
 
-    procRef.current = newProcessor(effect);
+    const proc = newProcessor(effect);
+    procRef.current = proc;
     trackRef.current = track;
-    await track.setProcessor(procRef.current);
+    await track.setProcessor(proc.wrapper);
     return true;
   } catch (err) {
     console.error("video effect error:", err);
@@ -239,7 +283,7 @@ export function useVideoEffects(): UseVideoEffects {
   const { localParticipant, isCameraEnabled } = useLocalParticipant();
   const [effect, setEffect] = useState<VideoEffect>(loadStoredEffect);
   const [busy, setBusy] = useState(false);
-  const procRef = useRef<BackgroundProcessorWrapper | null>(null);
+  const procRef = useRef<EffectProcessor | null>(null);
   const attachedRef = useRef<LocalVideoTrack | null>(null);
 
   const camTrack = useCallback((): LocalVideoTrack | undefined => {

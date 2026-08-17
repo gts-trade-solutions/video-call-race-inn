@@ -18,6 +18,7 @@
     "@livekit/components-react": "^2.6.9",
     "@livekit/components-styles": "^1.1.4",
     "@livekit/track-processors": "^0.7.2",
+    "@mediapipe/tasks-vision": "^0.10.14",
     "@types/nodemailer": "^8.0.1",
     "bcryptjs": "^2.4.3",
     "jose": "^5.9.6",
