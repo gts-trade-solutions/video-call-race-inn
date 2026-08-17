@@ -41,6 +41,8 @@ export type PrimaryPersonOptions = {
 const MIN_BLOB_FRACTION = 0.004;
 /** Cheap dilation of the kept shape so hair edges aren't clipped. */
 const MASK_FEATHER_PX = 2;
+/** Blur is computed at 1/N size and scaled back up — see composite(). */
+const BLUR_DOWNSCALE = 4;
 
 export class PrimaryPersonTransformer
   implements VideoTrackTransformer<PrimaryPersonOptions>
@@ -68,6 +70,9 @@ export class PrimaryPersonTransformer
    */
   private bgCanvas?: OffscreenCanvas | HTMLCanvasElement;
   private bgKey = "";
+  /** Quarter-size scratch canvas the background blur is computed on. */
+  private blurCanvas?: OffscreenCanvas | HTMLCanvasElement;
+  private blurCtx?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
   // Reused across frames so the hot path allocates nothing.
   private labels?: Int32Array;
@@ -169,8 +174,12 @@ export class PrimaryPersonTransformer
 
     const w = frame.displayWidth;
     const h = frame.displayHeight;
-    this.canvas.width = w;
-    this.canvas.height = h;
+    // Assigning width/height reallocates and clears the backing store, so only
+    // do it when the frame size actually changes.
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+    }
 
     let result: vision.ImageSegmenterResult | undefined;
     try {
@@ -301,14 +310,32 @@ export class PrimaryPersonTransformer
       ctx.filter = "none";
       ctx.drawImage(this.fittedBackground(w, h) as CanvasImageSource, 0, 0);
     } else {
+      // Blur small, then scale up. A Gaussian costs roughly the pixel count
+      // times the radius, so blurring 1080p directly is the single most
+      // expensive thing in this pipeline and it was dropping frames. Working
+      // at a quarter size with a quarter radius is ~16x less work, and the
+      // result is indistinguishable: a blur is throwing away exactly the
+      // detail that the downscale would have thrown away anyway. The bilinear
+      // upscale even smooths it a little further, for free.
+      const sw = Math.max(2, Math.round(w / BLUR_DOWNSCALE));
+      const sh = Math.max(2, Math.round(h / BLUR_DOWNSCALE));
+      if (!this.blurCanvas || this.blurCanvas.width !== sw || this.blurCanvas.height !== sh) {
+        this.blurCanvas = createCanvas(sw, sh);
+        this.blurCtx = this.blurCanvas.getContext(
+          "2d"
+        ) as CanvasRenderingContext2D;
+      }
+      const bctx = this.blurCtx!;
       // Scale the blur with frame size so it looks the same at any resolution.
       const radius = Math.max(
         4,
         Math.round(((this.options.blurRadius ?? 12) * w) / 1280)
       );
-      ctx.filter = `blur(${radius}px)`;
-      ctx.drawImage(frame as unknown as CanvasImageSource, 0, 0, w, h);
+      bctx.filter = `blur(${Math.max(1, Math.round(radius / BLUR_DOWNSCALE))}px)`;
+      bctx.drawImage(frame as unknown as CanvasImageSource, 0, 0, sw, sh);
+      bctx.filter = "none";
       ctx.filter = "none";
+      ctx.drawImage(this.blurCanvas as CanvasImageSource, 0, 0, w, h);
     }
 
     // 2. Cut the person out of the sharp frame using the mask as alpha.

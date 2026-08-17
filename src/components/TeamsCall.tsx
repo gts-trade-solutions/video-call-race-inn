@@ -465,6 +465,12 @@ export default function TeamsCall({
         // between readable and unreadable small type on a shared slide.
         contentHint: "detail",
         resolution: ScreenSharePresets.h1080fps15.resolution,
+      },
+      {
+        // The room default is 'balanced', which suits a camera. A shared
+        // screen is the opposite case: dropping to 15fps is barely noticeable,
+        // but dropping resolution makes small type unreadable.
+        degradationPreference: "maintain-resolution",
       });
     } catch (e) {
       // Cancelling the picker throws NotAllowedError — that's not a failure.

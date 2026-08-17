@@ -137,8 +137,18 @@ export default function MeetingRoom({
       typeof window !== "undefined" &&
       window.matchMedia("(max-width: 639px), (hover: none)").matches;
 
+    // Ask for the layer that matches the tile's *real* pixels, not its CSS
+    // pixels. LiveKit's default caps this at 1 on a 2x display, so a 460px
+    // tile on a Retina screen is really 920px of glass being fed a 460px
+    // stream — the single biggest cause of soft-looking video. Capped at 2 so
+    // a 3x phone doesn't start pulling three times the bitrate it can use.
+    const density = Math.min(
+      typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
+      2
+    );
+
     return {
-      adaptiveStream: true,
+      adaptiveStream: { pixelDensity: density },
       dynacast: true,
       videoCaptureDefaults: {
         deviceId: choices?.videoDeviceId ?? undefined,
@@ -158,16 +168,26 @@ export default function MeetingRoom({
         videoEncoding: onPhone
           ? VideoPresets.h720.encoding
           : VideoPresets.h1080.encoding,
-        videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+        // Only three layers ever go out (LiveKit publishes low, mid and the
+        // capture size), so the two we name decide what a mid-size tile gets.
+        // 180p+360p under a 1080p top layer left nothing between 360p and
+        // 1080p, so every tile that wasn't full-screen fell back to 360p and
+        // looked soft. These ladders keep a rung near every real tile size.
+        videoSimulcastLayers: onPhone
+          ? [VideoPresets.h180, VideoPresets.h360] // under 720p capture
+          : [VideoPresets.h360, VideoPresets.h720], // under 1080p capture
         // Shared screens are mostly text. 2.5 Mbps (the default) smears small
-        // type, and dropping resolution under load is exactly the wrong
-        // trade-off here — losing frames is far better than losing legibility.
+        // type.
         screenShareEncoding: {
           maxBitrate: 5_000_000,
           maxFramerate: 15,
           priority: "high",
         },
-        degradationPreference: "maintain-resolution",
+        // Camera: when the encoder can't keep up, shed resolution rather than
+        // frames. Stuttery video reads as "bad quality" far more than a
+        // slightly softer picture does. Screen share wants the opposite and
+        // asks for maintain-resolution at its own call site.
+        degradationPreference: "balanced",
         red: true,
         dtx: true,
       },
