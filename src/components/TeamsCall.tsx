@@ -38,6 +38,7 @@ import { useLiveCaptions } from "@/components/call/useLiveCaptions";
 import EffectsPanel from "@/components/call/EffectsPanel";
 import { useVideoEffects } from "@/components/call/useVideoEffects";
 import { useRaiseHand, type UseRaiseHand } from "@/components/call/useRaiseHand";
+import { useNetworkGuard } from "@/components/call/useNetworkGuard";
 import {
   useShareControl,
   type UseShareControl,
@@ -126,6 +127,9 @@ export default function TeamsCall({
 
   // ----- Roles, notifications, hands and screen-share control -----
   const { toasts, push: notify } = useToasts();
+  // Backs the received video quality off when the link can't keep up, so a
+  // struggling connection means softer video instead of video that stalls.
+  const net = useNetworkGuard();
   const roles = useMeetingRoles(room, {
     isHost,
     isOwner,
@@ -719,6 +723,17 @@ export default function TeamsCall({
               <span className="flex items-center gap-1.5 text-xs font-semibold text-red-300 bg-red-500/15 border border-red-500/40 rounded-md px-2 py-1">
                 <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
                 REC
+              </span>
+            )}
+            {/* Say why the picture went soft, so it reads as the app coping
+                with a weak connection rather than the app being broken. */}
+            {net.limited && (
+              <span
+                title="Your connection is struggling, so video quality was reduced to stop it stalling. It goes back up on its own."
+                className="flex items-center gap-1.5 text-xs font-medium text-amber-200 bg-amber-500/15 border border-amber-500/40 rounded-md px-2 py-1"
+              >
+                <SignalIcon />
+                <span className="hidden sm:inline">Weak connection</span>
               </span>
             )}
             <CallTimer />
@@ -2667,6 +2682,13 @@ const EffectsIcon = () => (
 const SpotlightIcon = ({ active }: { active?: boolean }) => (
   <svg {...I({ width: 15, height: 15, fill: active ? "currentColor" : "none" })}>
     <path d="M12 2l2.9 6.26L21 9.27l-4.5 4.38L17.8 21 12 17.27 6.2 21l1.3-7.35L3 9.27l6.1-1.01L12 2Z" />
+  </svg>
+);
+// Signal bars with the tallest one missing — "usable, but not strong".
+const SignalIcon = () => (
+  <svg {...I({ width: 13, height: 13 })}>
+    <path d="M4 20v-3M9 20v-6M14 20v-9" />
+    <path d="M19 20V8" opacity="0.35" />
   </svg>
 );
 // A drawing pin, to keep "pin for me" visually distinct from the host's star.

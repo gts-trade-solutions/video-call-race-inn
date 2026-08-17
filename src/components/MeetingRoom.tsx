@@ -130,18 +130,11 @@ export default function MeetingRoom({
   );
 
   const roomOptions = useMemo<RoomOptions>(() => {
-    // Capture 1080p on a computer, 720p on phones — a phone encoding 1080p
-    // while also running background blur drops frames and ends up looking
-    // worse than a clean 720p.
-    const onPhone =
-      typeof window !== "undefined" &&
-      window.matchMedia("(max-width: 639px), (hover: none)").matches;
-
     // Ask for the layer that matches the tile's *real* pixels, not its CSS
-    // pixels. LiveKit's default caps this at 1 on a 2x display, so a 460px
-    // tile on a Retina screen is really 920px of glass being fed a 460px
-    // stream — the single biggest cause of soft-looking video. Capped at 2 so
-    // a 3x phone doesn't start pulling three times the bitrate it can use.
+    // pixels. LiveKit's default caps this at 1 on a 2x display, so a 460px tile
+    // on a Retina screen is 920px of glass being fed a 460px stream, which is
+    // why video looked soft. Capped at 2: a 3x phone asking for 3x would pull
+    // bitrate it has no pixels to show.
     const density = Math.min(
       typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
       2
@@ -152,9 +145,10 @@ export default function MeetingRoom({
       dynacast: true,
       videoCaptureDefaults: {
         deviceId: choices?.videoDeviceId ?? undefined,
-        resolution: onPhone
-          ? VideoPresets.h720.resolution
-          : VideoPresets.h1080.resolution,
+        // 720p everywhere. Capturing 1080p only to publish a 720p top layer
+        // wastes encoder time — and on a phone, or with background blur
+        // running, that lost time shows up as dropped frames.
+        resolution: VideoPresets.h720.resolution,
       },
       audioCaptureDefaults: {
         deviceId: choices?.audioDeviceId ?? undefined,
@@ -163,19 +157,17 @@ export default function MeetingRoom({
         autoGainControl: true,
       },
       publishDefaults: {
-        // Full-size tiles get the top layer; simulcast keeps thumbnails and
-        // weak connections cheap, so raising this doesn't punish anyone.
-        videoEncoding: onPhone
-          ? VideoPresets.h720.encoding
-          : VideoPresets.h1080.encoding,
+        // 720p is the top rung for camera on every device. 1080p sounds better
+        // but costs 3 Mbps on its own, and publishing 360p+720p+1080p together
+        // is over 5 Mbps up from every participant — enough to saturate an
+        // ordinary connection and make video freeze every few seconds for
+        // everyone watching. 720p is visually close and less than half the cost.
+        videoEncoding: VideoPresets.h720.encoding,
         // Only three layers ever go out (LiveKit publishes low, mid and the
         // capture size), so the two we name decide what a mid-size tile gets.
-        // 180p+360p under a 1080p top layer left nothing between 360p and
-        // 1080p, so every tile that wasn't full-screen fell back to 360p and
-        // looked soft. These ladders keep a rung near every real tile size.
-        videoSimulcastLayers: onPhone
-          ? [VideoPresets.h180, VideoPresets.h360] // under 720p capture
-          : [VideoPresets.h360, VideoPresets.h720], // under 1080p capture
+        // Under a 720p top these give 180p/360p/720p: a rung near every real
+        // tile size, and no 360p-to-1080p hole for mid tiles to fall down.
+        videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
         // Shared screens are mostly text. 2.5 Mbps (the default) smears small
         // type.
         screenShareEncoding: {
