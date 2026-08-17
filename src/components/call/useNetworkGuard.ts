@@ -9,75 +9,74 @@ import {
 import { useRoomContext } from "@livekit/components-react";
 
 /**
- * Keeps video moving when the connection can't carry it.
+ * Last-resort protection for a link that genuinely can't carry the video.
  *
- * adaptiveStream already sizes each stream to its tile, but it only knows about
- * pixels — not about bandwidth. So a four-person grid can quite reasonably ask
- * for four sharp streams that together exceed the link, and the result is video
- * that freezes for a second every few seconds while the decoder waits for a
- * keyframe. Softer video is much easier to watch than stuttering video, so when
- * the link is struggling we cap what we ask for.
+ * adaptiveStream sizes each stream to its tile and the server's own bandwidth
+ * estimation drops layers when it must, so both halves of the normal case are
+ * already handled. This exists only for the case they don't cover: a link losing
+ * so many packets that video stalls while everyone insists there's bandwidth.
  *
- * setVideoQuality composes with adaptiveStream rather than fighting it: the
- * server honours whichever of the two is smaller, so this is a ceiling and
- * small tiles stay cheap either way.
+ * It is deliberately reluctant, because the first version of this was not and
+ * that was worse than the problem. It escalated on LiveKit's coarse
+ * "poor connection" label — which an ordinary mobile link reports readily — went
+ * two steps down to 180p within ten seconds, and needed twenty clean seconds to
+ * come back. The likely result was people pinned at 180p wondering why the video
+ * looked terrible, with nothing on screen saying so.
  *
- * Screen shares are left alone. They're usually the reason for the meeting, and
- * they're mostly static, so they cost far less than their resolution suggests.
+ * So now: it triggers on *measured* packet loss rather than a label, needs two
+ * consecutive bad samples to act, recovers after two clean ones, and never goes
+ * below 360p. Anything worse than that is the server's job, and the server has
+ * far better information than this does.
+ *
+ * setVideoQuality composes with adaptiveStream instead of fighting it — the
+ * server honours whichever is smaller — so this is a ceiling, and small tiles
+ * stay cheap either way.
  */
 
-/** How far we've backed off. 0 = no cap. */
-export type GuardLevel = 0 | 1 | 2;
-
 export type NetworkGuard = {
-  level: GuardLevel;
-  /** True once we've had to reduce quality — the UI says so. */
+  /** True while the cap is on. */
   limited: boolean;
+  /** What we're limited to, for the connection panel. */
+  capLabel: string | null;
 };
 
-const CHECK_MS = 5000;
-/** Consecutive healthy checks before easing back — stops it flapping. */
-const RECOVER_TICKS = 4;
+/** Loss at or above this, twice running, is real congestion. */
+const BAD_LOSS_PCT = 5;
+/** Loss below this counts as a clean sample. */
+const GOOD_LOSS_PCT = 2;
+/** Consecutive samples needed to start capping, and to stop. */
+const BAD_SAMPLES = 2;
+const GOOD_SAMPLES = 2;
 
-const CAP: Record<GuardLevel, VideoQuality | null> = {
-  0: null, // ask for whatever the tile size warrants
-  1: VideoQuality.MEDIUM, // ~360p
-  2: VideoQuality.LOW, // ~180p
-};
-
-export function useNetworkGuard(): NetworkGuard {
+export function useNetworkGuard(lossPct: number | null): NetworkGuard {
   const room = useRoomContext();
-  const [level, setLevel] = useState<GuardLevel>(0);
-  const levelRef = useRef<GuardLevel>(0);
-  levelRef.current = level;
+  const [limited, setLimited] = useState(false);
+  const limitedRef = useRef(false);
+  limitedRef.current = limited;
 
-  // ----- Decide the level from the local link's health -----
+  // ----- Decide, from measured loss -----
+  const bad = useRef(0);
+  const good = useRef(0);
   useEffect(() => {
-    if (!room) return;
-    let healthy = 0;
+    // 'Lost' means the connection is gone, which is worth acting on regardless
+    // of what the loss counter last read.
+    const lost = room?.localParticipant?.connectionQuality === ConnectionQuality.Lost;
+    if (lossPct === null && !lost) return; // no measurement yet — hold
 
-    const t = setInterval(() => {
-      const q = room.localParticipant?.connectionQuality;
-      // 'Unknown' shows up briefly on join; treat it as neither good nor bad.
-      if (q === ConnectionQuality.Unknown || q === undefined) return;
-      const struggling =
-        q === ConnectionQuality.Poor || q === ConnectionQuality.Lost;
-
-      if (struggling) {
-        healthy = 0;
-        const next = Math.min(2, levelRef.current + 1) as GuardLevel;
-        if (next !== levelRef.current) setLevel(next);
-        return;
-      }
-      healthy += 1;
-      if (healthy >= RECOVER_TICKS && levelRef.current > 0) {
-        healthy = 0;
-        setLevel((Math.max(0, levelRef.current - 1) as GuardLevel));
-      }
-    }, CHECK_MS);
-
-    return () => clearInterval(t);
-  }, [room]);
+    if (lost || (lossPct !== null && lossPct >= BAD_LOSS_PCT)) {
+      good.current = 0;
+      bad.current += 1;
+      if (bad.current >= BAD_SAMPLES && !limitedRef.current) setLimited(true);
+      return;
+    }
+    if (lossPct !== null && lossPct < GOOD_LOSS_PCT) {
+      bad.current = 0;
+      good.current += 1;
+      if (good.current >= GOOD_SAMPLES && limitedRef.current) setLimited(false);
+    }
+    // Between the two thresholds: leave things as they are, so a link hovering
+    // around 3% loss doesn't flip the cap on and off.
+  }, [lossPct, room]);
 
   // ----- Apply it to every remote camera stream -----
   useEffect(() => {
@@ -85,12 +84,15 @@ export function useNetworkGuard(): NetworkGuard {
 
     const applyTo = (pub: RemoteTrackPublication) => {
       if (pub.kind !== Track.Kind.Video) return;
+      // Screen shares are usually the reason for the meeting and are mostly
+      // static, so they cost far less than their resolution suggests.
       if (pub.source === Track.Source.ScreenShare) return;
-      const cap = CAP[levelRef.current];
       try {
-        // VideoQuality.HIGH is the ceiling being lifted, not a demand for the
-        // top layer: adaptiveStream still decides the actual size from the tile.
-        pub.setVideoQuality(cap ?? VideoQuality.HIGH);
+        // HIGH lifts the ceiling rather than demanding the top layer:
+        // adaptiveStream still picks the size from the tile.
+        pub.setVideoQuality(
+          limitedRef.current ? VideoQuality.MEDIUM : VideoQuality.HIGH
+        );
       } catch {
         /* a stream that just went away isn't worth reporting */
       }
@@ -106,14 +108,13 @@ export function useNetworkGuard(): NetworkGuard {
     };
 
     applyAll();
-    // Anything that subscribes later needs the current cap too.
     room.on(RoomEvent.TrackSubscribed, applyAll);
     room.on(RoomEvent.ParticipantConnected, applyAll);
     return () => {
       room.off(RoomEvent.TrackSubscribed, applyAll);
       room.off(RoomEvent.ParticipantConnected, applyAll);
     };
-  }, [room, level]);
+  }, [room, limited]);
 
-  return { level, limited: level > 0 };
+  return { limited, capLabel: limited ? "360p" : null };
 }

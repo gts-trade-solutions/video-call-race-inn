@@ -152,9 +152,11 @@ export default function TeamsCall({
   const { toasts, push: notify } = useToasts();
   // Backs the received video quality off when the link can't keep up, so a
   // struggling connection means softer video instead of video that stalls.
-  const net = useNetworkGuard();
   // Latency and the rest of the connection numbers, shown in the header.
   const connStats = useConnectionStats(true);
+  // Backs the received video off only when loss is measurably bad — see the
+  // hook for why it is deliberately reluctant.
+  const net = useNetworkGuard(connStats.lossPct);
   const roles = useMeetingRoles(room, {
     isHost,
     isOwner,
@@ -829,7 +831,7 @@ export default function TeamsCall({
                 <span className="hidden sm:inline">Weak connection</span>
               </span>
             )}
-            <LatencyPill stats={connStats} />
+            <LatencyPill stats={connStats} cap={net.capLabel} />
             <CallTimer />
             <button
               onClick={copyInvite}
@@ -2544,7 +2546,14 @@ function RoleTag({ label }: { label: string }) {
  * arbitrary scale: under ~150ms nobody notices, by ~300ms people start talking
  * over each other, and beyond that it's a walkie-talkie.
  */
-function LatencyPill({ stats }: { stats: ConnectionStats }) {
+function LatencyPill({
+  stats,
+  cap,
+}: {
+  stats: ConnectionStats;
+  /** Set when the guard is holding quality down, so it is never a mystery. */
+  cap: string | null;
+}) {
   const [open, setOpen] = useState(false);
   const { rttMs } = stats;
 
@@ -2602,6 +2611,9 @@ function LatencyPill({ stats }: { stats: ConnectionStats }) {
           <div className="pt-1.5 border-t border-white/10" />
           <Row k="You're sending" v={line(stats.send)} />
           <Row k="Receiving" v={line(stats.recv)} />
+          {/* If quality is being held down, say so here — a cap nobody can see
+              is indistinguishable from the app simply being bad. */}
+          {cap && <Row k="Limited to" v={`${cap} (weak connection)`} />}
           <p className="text-[11px] text-gray-400 pt-1 leading-snug">
             Latency is to the media server, not to the other person.
           </p>
