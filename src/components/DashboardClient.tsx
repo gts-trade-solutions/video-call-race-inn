@@ -38,7 +38,6 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
   const [showJoin, setShowJoin] = useState(false);
   const [joinId, setJoinId] = useState("");
   const [showSchedule, setShowSchedule] = useState(false);
-  const [createdLink, setCreatedLink] = useState<string | null>(null);
 
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [calMsg, setCalMsg] = useState<string | null>(null);
@@ -79,26 +78,6 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
         return;
       }
       router.push(`/meeting/${data.roomId}`);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Create a shareable link without joining (the old primary action).
-  async function createLink() {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/meetings", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Could not create link.");
-        return;
-      }
-      const link = `${window.location.origin}/meeting/${data.roomId}`;
-      navigator.clipboard?.writeText(link).catch(() => {});
-      setCreatedLink(link);
-      loadMeetings();
     } finally {
       setLoading(false);
     }
@@ -170,29 +149,26 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
           </button>
         </div>
 
-        {/* Meeting links */}
+        {/* Meeting links — the list of unscheduled meetings. Meet now and
+            Schedule a meeting are the only ways to add one; a standalone
+            "new link" button just made rooms nobody ever joined. */}
         <div className="flex items-center justify-between mt-10 mb-3">
           <h2 className="text-lg font-bold text-teams-dark">Meeting links</h2>
-          <button
-            onClick={createLink}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 text-sm border border-teams-line hover:bg-teams-bg rounded-md px-3 py-1.5 font-medium disabled:opacity-60"
-          >
-            <LinkIcon small />+ New link
-          </button>
         </div>
         {links.length === 0 ? (
           <div className="border border-teams-line rounded-lg p-6">
             <div className="text-3xl mb-3">🔗</div>
             <p className="text-teams-dark font-medium">
-              Quickly create, save, and share links with anyone.
+              No meeting links yet.
             </p>
-            <button
-              onClick={createLink}
-              className="text-teams-purple font-medium text-sm mt-2 hover:underline"
-            >
-              Create a meeting link
-            </button>
+            <p className="text-sm text-teams-gray mt-1">
+              Start one with{" "}
+              <span className="font-medium text-teams-dark">Meet now</span> or{" "}
+              <span className="font-medium text-teams-dark">
+                Schedule a meeting
+              </span>{" "}
+              and its link appears here to copy and share.
+            </p>
           </div>
         ) : (
           <div className="border border-teams-line rounded-lg divide-y divide-teams-line overflow-hidden">
@@ -423,43 +399,6 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
         )}
       </div>
 
-      {/* Created-link toast */}
-      {createdLink && (
-        <div className="fixed bottom-5 right-5 z-50 bg-white border border-teams-line shadow-2xl rounded-xl p-4 w-96 max-w-[90vw]">
-          <div className="flex items-center justify-between mb-2">
-            <span className="font-semibold text-teams-dark">
-              Meeting link created
-            </span>
-            <button
-              onClick={() => setCreatedLink(null)}
-              className="text-teams-gray hover:text-teams-dark"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="text-xs text-teams-gray font-mono bg-teams-bg rounded px-2 py-1.5 break-all mb-3">
-            {createdLink}
-          </div>
-          <p className="text-xs text-teams-gray mb-3">Copied to clipboard ✓</p>
-          <div className="flex gap-2 justify-end">
-            <button
-              onClick={() => {
-                navigator.clipboard?.writeText(createdLink).catch(() => {});
-              }}
-              className="text-sm border border-teams-line rounded-md px-3 py-1.5"
-            >
-              Copy again
-            </button>
-            <button
-              onClick={() => router.push(createdLink.replace(window.location.origin, ""))}
-              className="text-sm bg-teams-purple hover:bg-teams-purpleDark text-white rounded-md px-3 py-1.5"
-            >
-              Join now
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Join modal */}
       {showJoin && (
         <Modal title="Join with a meeting ID" onClose={() => setShowJoin(false)}>
@@ -652,20 +591,6 @@ function VideoIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
       <path
         d="M15 10.5V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3.5l5 4v-11l-5 4Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-function LinkIcon({ small }: { small?: boolean }) {
-  const s = small ? 15 : 20;
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none">
-      <path
-        d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"

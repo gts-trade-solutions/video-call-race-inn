@@ -26,7 +26,11 @@ export function ScheduleModal({
   /** Called on success with a human-readable summary banner text. */
   onScheduled: (summary: string | null) => void;
 }) {
-  const [title, setTitle] = useState("");
+  // Start with the name the meeting would end up with anyway, rather than an
+  // empty box: the field was being left blank and every meeting came out called
+  // "<name>'s meeting". Prefilled and selectable, so it's still one action to
+  // type something better.
+  const [title, setTitle] = useState(`${defaultName}'s meeting`);
   const [when, setWhen] = useState(defaultWhen ?? "");
   const [duration, setDuration] = useState(30);
   const [saving, setSaving] = useState(false);
@@ -86,6 +90,10 @@ export function ScheduleModal({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Add a title"
+          autoFocus
+          // Select the prefilled name so typing replaces it instead of
+          // landing in the middle of it.
+          onFocus={(e) => e.currentTarget.select()}
           className="mt-1 w-full rounded-md border border-teams-line px-3 py-2 outline-none focus:border-teams-purple focus:ring-1 focus:ring-teams-purple"
         />
       </label>
