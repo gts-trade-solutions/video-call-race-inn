@@ -32,6 +32,7 @@ export function ScheduleModal({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [invitees, setInvitees] = useState<string[]>([]);
+  const [mode, setMode] = useState<"meeting" | "webinar">("meeting");
 
   async function save() {
     if (!when) {
@@ -53,6 +54,7 @@ export function ScheduleModal({
           scheduledAt: new Date(when).toISOString(),
           durationMins: duration,
           invitees,
+          mode,
         }),
       });
       const d = await res.json().catch(() => ({}));
@@ -87,6 +89,48 @@ export function ScheduleModal({
           className="mt-1 w-full rounded-md border border-teams-line px-3 py-2 outline-none focus:border-teams-purple focus:ring-1 focus:ring-teams-purple"
         />
       </label>
+      {/* Meeting vs webinar. This decides who is allowed to publish audio and
+          video, which is what makes a large audience possible at all. */}
+      <div className="mb-3">
+        <span className="text-sm font-medium text-teams-dark">Type</span>
+        <div className="mt-1 grid grid-cols-2 gap-2">
+          {(
+            [
+              {
+                id: "meeting" as const,
+                title: "Meeting",
+                blurb: "Everyone can talk and share. Best up to ~20 people.",
+              },
+              {
+                id: "webinar" as const,
+                title: "Webinar",
+                blurb:
+                  "You present, everyone else listens. Holds ~100 attendees.",
+              },
+            ]
+          ).map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => setMode(o.id)}
+              aria-pressed={mode === o.id}
+              className={`text-left rounded-lg border px-3 py-2 transition ${
+                mode === o.id
+                  ? "border-teams-purple bg-teams-purple/5 ring-1 ring-teams-purple"
+                  : "border-teams-line hover:bg-teams-bg"
+              }`}
+            >
+              <span className="block text-sm font-medium text-teams-dark">
+                {o.title}
+              </span>
+              <span className="block text-[11px] text-teams-gray leading-snug mt-0.5">
+                {o.blurb}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       <InviteePicker value={invitees} onChange={setInvitees} />
       <div className="flex gap-3">
         <label className="block flex-1">

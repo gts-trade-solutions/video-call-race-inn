@@ -19,7 +19,9 @@ export type ParticipantAction =
   | "stopVideo"
   | "remove"
   | "promote"
-  | "demote";
+  | "demote"
+  | "allowSpeak"
+  | "revokeSpeak";
 
 export type MeetingRoles = {
   ownerIdentity: string;
@@ -28,6 +30,14 @@ export type MeetingRoles = {
   managerIdentities: string[];
   isOwner: boolean;
   canManage: boolean;
+  /** 'webinar' = only hosts and invited speakers publish. */
+  mode: "meeting" | "webinar";
+  /** Attendees the host has let speak. */
+  speakerIdentities: string[];
+  /** Everyone allowed to publish: hosts, co-hosts and invited speakers. */
+  publisherIdentities: string[];
+  /** I may turn on my mic/camera. */
+  canPublish: boolean;
   /**
    * Runs a host action. Resolves to an error string when the server refused,
    * or null on success.
@@ -46,12 +56,18 @@ export function useMeetingRoles(
     isOwner: boolean;
     ownerIdentity: string;
     coHostIdentities: string[];
+    mode: "meeting" | "webinar";
+    speakerIdentities: string[];
+    canPublish: boolean;
   }
 ): MeetingRoles {
   const [ownerIdentity, setOwnerIdentity] = useState(initial.ownerIdentity);
   const [coHostIdentities, setCoHosts] = useState(initial.coHostIdentities);
   const [isOwner, setIsOwner] = useState(initial.isOwner);
   const [canManage, setCanManage] = useState(initial.isHost);
+  const [mode, setMode] = useState(initial.mode);
+  const [speakerIdentities, setSpeakers] = useState(initial.speakerIdentities);
+  const [canPublish, setCanPublish] = useState(initial.canPublish);
   const [busy, setBusy] = useState(false);
   const sendRef = useRef<Sender | null>(null);
 
@@ -73,8 +89,18 @@ export function useMeetingRoles(
             : d.coHostIdentities
         );
       }
+      if (Array.isArray(d.speakerIdentities)) {
+        setSpeakers((prev) =>
+          prev.length === d.speakerIdentities.length &&
+          prev.every((v, i) => v === d.speakerIdentities[i])
+            ? prev
+            : d.speakerIdentities
+        );
+      }
+      if (d.mode === "meeting" || d.mode === "webinar") setMode(d.mode);
       setIsOwner(!!d.isOwner);
       setCanManage(!!d.canManage);
+      setCanPublish(!!d.canPublish);
     } catch {
       /* transient — the next poll reconciles */
     }
@@ -102,7 +128,12 @@ export function useMeetingRoles(
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok) return (d.error as string) || "That didn't work.";
-        if (action === "promote" || action === "demote") {
+        if (
+          action === "promote" ||
+          action === "demote" ||
+          action === "allowSpeak" ||
+          action === "revokeSpeak"
+        ) {
           await refresh();
           // Tell everyone else to re-read their role straight away instead of
           // waiting up to 10s for the next poll.
@@ -123,10 +154,19 @@ export function useMeetingRoles(
     [ownerIdentity, coHostIdentities]
   );
 
+  const publisherIdentities = useMemo(
+    () => [...managerIdentities, ...speakerIdentities],
+    [managerIdentities, speakerIdentities]
+  );
+
   return {
     ownerIdentity,
     coHostIdentities,
     managerIdentities,
+    mode,
+    speakerIdentities,
+    publisherIdentities,
+    canPublish,
     isOwner,
     canManage,
     runAction,

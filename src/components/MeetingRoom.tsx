@@ -50,6 +50,9 @@ export default function MeetingRoom({
   const [isOwner, setIsOwner] = useState(false);
   const [ownerIdentity, setOwnerIdentity] = useState("");
   const [coHostIdentities, setCoHostIdentities] = useState<string[]>([]);
+  const [mode, setMode] = useState<"meeting" | "webinar">("meeting");
+  const [speakerIdentities, setSpeakerIdentities] = useState<string[]>([]);
+  const [canPublish, setCanPublish] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -131,6 +134,10 @@ export default function MeetingRoom({
     isOwner?: boolean;
     ownerIdentity?: string;
     coHostIdentities?: string[];
+    /** 'webinar' = only hosts and invited speakers may publish. */
+    mode?: "meeting" | "webinar";
+    speakerIdentities?: string[];
+    canPublish?: boolean;
   };
 
   const requestToken = useCallback(async (): Promise<{
@@ -165,6 +172,9 @@ export default function MeetingRoom({
       setIsOwner(!!data.isOwner);
       setOwnerIdentity(data.ownerIdentity ?? "");
       setCoHostIdentities(data.coHostIdentities ?? []);
+      setMode(data.mode ?? "meeting");
+      setSpeakerIdentities(data.speakerIdentities ?? []);
+      setCanPublish(data.canPublish ?? true);
       return "in-call";
     },
     []
@@ -368,8 +378,10 @@ export default function MeetingRoom({
         token={token}
         serverUrl={serverUrl}
         connect={true}
-        video={choices?.videoEnabled ?? true}
-        audio={choices?.audioEnabled ?? true}
+        // A webinar attendee's token forbids publishing, so asking LiveKit to
+        // turn their camera on would just raise an error on join.
+        video={canPublish && (choices?.videoEnabled ?? true)}
+        audio={canPublish && (choices?.audioEnabled ?? true)}
         options={roomOptions}
         onConnected={() => {
           everConnected.current = true;
@@ -422,6 +434,9 @@ export default function MeetingRoom({
           isOwner={isOwner}
           ownerIdentity={ownerIdentity}
           coHostIdentities={coHostIdentities}
+          mode={mode}
+          speakerIdentities={speakerIdentities}
+          canPublish={canPublish}
         />
       </LiveKitRoom>
     </div>

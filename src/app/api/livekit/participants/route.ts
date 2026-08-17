@@ -28,7 +28,9 @@ type Action =
   | "stopVideo"
   | "remove"
   | "promote"
-  | "demote";
+  | "demote"
+  | "allowSpeak"
+  | "revokeSpeak";
 
 const ACTIONS: Action[] = [
   "mute",
@@ -37,6 +39,8 @@ const ACTIONS: Action[] = [
   "remove",
   "promote",
   "demote",
+  "allowSpeak",
+  "revokeSpeak",
 ];
 
 /**
@@ -69,6 +73,9 @@ export async function GET(req: Request) {
     isOwner: role.isOwner,
     isCoHost: role.isCoHost,
     canManage: role.canManage,
+    mode: role.mode,
+    speakerIdentities: role.speakerIdentities,
+    canPublish: role.canPublish,
   });
 }
 
@@ -158,6 +165,65 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: svc.error }, { status: 500 });
   }
   const client = svc.client;
+
+  // ----- Webinar: let an attendee speak, or move them back to listening -----
+  if (action === "allowSpeak" || action === "revokeSpeak") {
+    const targetId = userIdFromIdentity(identity!);
+    if (!targetId) {
+      return NextResponse.json({ error: "Unknown participant" }, { status: 400 });
+    }
+    const pool = getPool();
+    const allow = action === "allowSpeak";
+
+    if (allow) {
+      await pool.query<ResultSetHeader>(
+        `INSERT INTO meeting_speakers (meeting_id, user_id, granted_by)
+         VALUES (:meetingId, :userId, :by)
+         ON DUPLICATE KEY UPDATE granted_by = :by`,
+        { meetingId: role.meetingId, userId: targetId, by: user.id }
+      );
+    } else {
+      await pool.query<ResultSetHeader>(
+        "DELETE FROM meeting_speakers WHERE meeting_id = :meetingId AND user_id = :userId",
+        { meetingId: role.meetingId, userId: targetId }
+      );
+    }
+
+    // The DB row decides what a *future* token grants; this updates the
+    // permission on their live connection so it takes effect immediately.
+    try {
+      await client.updateParticipant(room, identity!, undefined, {
+        canSubscribe: true,
+        canPublish: allow,
+        canPublishData: true,
+        canPublishSources: [],
+        hidden: false,
+        recorder: false,
+        canUpdateMetadata: false,
+        canSubscribeMetrics: false,
+        agent: false,
+      });
+    } catch (err) {
+      // Not in the room right now — the stored row still applies when they join.
+      console.error("updateParticipant (speak) failed:", err);
+    }
+
+    // Revoking leaves their published tracks running, so stop them too.
+    if (!allow) {
+      try {
+        const target = await client.getParticipant(room, identity!);
+        await muteSources(client, room, target, [
+          TrackSource.MICROPHONE,
+          TrackSource.CAMERA,
+          TrackSource.SCREEN_SHARE,
+        ]);
+      } catch {
+        /* already gone */
+      }
+    }
+
+    return NextResponse.json({ ok: true, canPublish: allow });
+  }
 
   // Co-hosts manage attendees, not each other or the host. The owner outranks
   // everyone, so this only constrains co-hosts.

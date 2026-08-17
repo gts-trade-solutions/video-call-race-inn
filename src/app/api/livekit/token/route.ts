@@ -136,10 +136,15 @@ export async function GET(req: Request) {
       name: user.name,
       ttl: "2h",
     });
+    // Attendees in a webinar are subscribe-only. This is the grant that makes
+    // ~100 attendees viable: without it every attendee could publish, so the
+    // server would be fanning out 100 video streams to 100 people. They keep
+    // canPublishData so chat, reactions and raising a hand still work.
+    const canPublish = role?.canPublish ?? true;
     at.addGrant({
       room,
       roomJoin: true,
-      canPublish: true,
+      canPublish,
       canSubscribe: true,
       canPublishData: true,
     });
@@ -154,6 +159,9 @@ export async function GET(req: Request) {
       identity,
       ownerIdentity,
       coHostIdentities,
+      mode: role?.mode ?? "meeting",
+      canPublish,
+      speakerIdentities: role?.speakerIdentities ?? [],
     });
   } catch (err) {
     console.error("livekit token error:", err);

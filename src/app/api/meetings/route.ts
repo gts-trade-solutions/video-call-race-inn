@@ -90,6 +90,9 @@ export async function POST(req: Request) {
     );
     const addToGoogle = body?.addToGoogleCalendar === true;
     const invitees = cleanInvitees(body?.invitees, user.email);
+    // 'webinar' makes everyone but the host and invited speakers listen-only,
+    // which is what lets one room hold around a hundred attendees.
+    const mode = body?.mode === "webinar" ? "webinar" : "meeting";
 
     const pool = getPool();
     let roomId = makeRoomId();
@@ -104,9 +107,16 @@ export async function POST(req: Request) {
     }
 
     await pool.query<ResultSetHeader>(
-      `INSERT INTO meetings (room_id, title, host_id, scheduled_at, duration_mins)
-       VALUES (:roomId, :title, :hostId, :scheduledAt, :durationMins)`,
-      { roomId, title, hostId: user.id, scheduledAt: scheduledSql, durationMins }
+      `INSERT INTO meetings (room_id, title, host_id, scheduled_at, duration_mins, mode)
+       VALUES (:roomId, :title, :hostId, :scheduledAt, :durationMins, :mode)`,
+      {
+        roomId,
+        title,
+        hostId: user.id,
+        scheduledAt: scheduledSql,
+        durationMins,
+        mode,
+      }
     );
 
     // ----- Invitations -----

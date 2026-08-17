@@ -224,6 +224,35 @@ export function ensureSchema(): Promise<void> {
         if ((e as { errno?: number }).errno !== 1060) throw e;
       }
 
+      // Migration: 'meeting' = everyone can speak; 'webinar' = only the host
+      // and co-hosts publish and everyone else listens, which is what lets a
+      // room hold ~100 attendees without 100 outgoing video streams.
+      try {
+        await pool.query(
+          "ALTER TABLE meetings ADD COLUMN mode ENUM('meeting','webinar') NOT NULL DEFAULT 'meeting'"
+        );
+      } catch (e) {
+        if ((e as { errno?: number }).errno !== 1060) throw e;
+      }
+
+      // Migration: attendees the host has let speak in a webinar. Separate from
+      // meeting_cohosts because speaking isn't the same as running the meeting.
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS meeting_speakers (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          meeting_id INT NOT NULL,
+          user_id INT NOT NULL,
+          granted_by INT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uniq_speaker (meeting_id, user_id),
+          INDEX idx_speaker_meeting (meeting_id),
+          CONSTRAINT fk_spk_meeting FOREIGN KEY (meeting_id)
+            REFERENCES meetings(id) ON DELETE CASCADE,
+          CONSTRAINT fk_spk_user FOREIGN KEY (user_id)
+            REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
       // Migration: when the "starting soon" nudge was sent (null = not yet).
       try {
         await pool.query(

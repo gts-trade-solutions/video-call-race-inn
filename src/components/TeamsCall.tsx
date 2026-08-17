@@ -75,9 +75,16 @@ export default function TeamsCall({
   isOwner = false,
   ownerIdentity = "",
   coHostIdentities = [],
+  mode = "meeting",
+  speakerIdentities = [],
+  canPublish = true,
 }: {
   room: string;
   title?: string;
+  /** 'webinar' = only hosts and invited speakers may turn on mic/camera. */
+  mode?: "meeting" | "webinar";
+  speakerIdentities?: string[];
+  canPublish?: boolean;
   /** May run the meeting — the owner or a co-host. */
   isHost?: boolean;
   /** Created the meeting; only they can promote co-hosts. */
@@ -104,7 +111,11 @@ export default function TeamsCall({
     { onlySubscribed: false }
   );
 
-  const cameraTiles = trackRefs.filter(
+  // `withPlaceholder` gives every participant a tile even with no camera — in a
+  // webinar that would be 100 empty squares, so placeholders are kept only for
+  // people who are actually allowed to publish. Anyone publishing right now is
+  // always shown, whatever their role says.
+  const allCameraTiles = trackRefs.filter(
     (t) => t.source === Track.Source.Camera
   );
   const screenShares = trackRefs.filter(
@@ -120,8 +131,28 @@ export default function TeamsCall({
     isOwner,
     ownerIdentity,
     coHostIdentities,
+    mode,
+    speakerIdentities,
+    canPublish,
   });
   const canManage = roles.canManage;
+  // In a webinar the audience doesn't get mic/camera/share controls at all —
+  // the token doesn't permit publishing, so showing them would only mislead.
+  const isWebinar = roles.mode === "webinar";
+  const iCanPublish = roles.canPublish;
+
+  const cameraTiles = useMemo(
+    () =>
+      isWebinar
+        ? allCameraTiles.filter(
+            (t) =>
+              !!t.publication ||
+              t.participant.isLocal ||
+              roles.publisherIdentities.includes(t.participant.identity)
+          )
+        : allCameraTiles,
+    [isWebinar, allCameraTiles, roles.publisherIdentities]
+  );
 
   const nameOf = useCallback(
     (identity: string) => {
@@ -781,81 +812,101 @@ export default function TeamsCall({
           }`}
         >
           <div className="flex flex-wrap items-center justify-center gap-1.5 bg-teams-stage/95 rounded-2xl px-2 sm:px-3 py-2 shadow-2xl border border-white/10 max-w-full">
-            <TrackToggle
-              source={Track.Source.Microphone}
-              showIcon={false}
-              aria-label="Toggle microphone"
-              title="Microphone"
-              className={ctrlBtn(isMicrophoneEnabled)}
-            >
-              {isMicrophoneEnabled ? <MicIcon /> : <MicOffIcon />}
-              <span className="ctrl-label">Mic</span>
-            </TrackToggle>
-
-            <TrackToggle
-              source={Track.Source.Camera}
-              showIcon={false}
-              aria-label="Toggle camera"
-              title="Camera"
-              className={ctrlBtn(isCameraEnabled)}
-            >
-              {isCameraEnabled ? <CamIcon /> : <CamOffIcon />}
-              <span className="ctrl-label">Camera</span>
-            </TrackToggle>
-
-            <button
-              onClick={() => setPanel(panel === "effects" ? "none" : "effects")}
-              aria-label="Video effects and backgrounds"
-              title="Video effects and backgrounds"
-              className={ctrlBtn(
-                panel === "effects" || effects.effect.mode !== "none"
-              )}
-            >
-              <EffectsIcon />
-              <span className="ctrl-label">Effects</span>
-            </button>
-
-            {/* Phones: flip to the rear camera to show a document or board. */}
-            {hasTwoCameras && (
-              <button
-                onClick={flipCamera}
-                disabled={flipBusy}
-                aria-label="Switch camera"
-                title="Switch between front and rear camera"
-                className={
-                  ctrlBtn(facingMode === "environment") + " disabled:opacity-50"
-                }
-              >
-                <FlipCameraIcon />
-                <span className="ctrl-label">{flipBusy ? "…" : "Flip"}</span>
-              </button>
+            {/* Attendees in a webinar can't publish, so instead of dead
+                buttons they get a plain statement of where they stand. */}
+            {!iCanPublish && (
+              <span className="flex items-center gap-1.5 text-xs text-gray-300 bg-white/5 rounded-xl px-3 py-2">
+                <HeadphonesIcon />
+                <span className="hidden sm:inline">
+                  {hands.myHandUp
+                    ? "Hand raised — waiting for the host"
+                    : "You're listening — raise your hand to speak"}
+                </span>
+                <span className="sm:hidden">Listening</span>
+              </span>
             )}
 
-            <button
-              onClick={toggleShare}
-              disabled={shareBusy}
-              aria-label="Share screen or present a photo"
-              title="Share your screen (on phones: present a photo)"
-              className={ctrlBtn(isScreenShareEnabled) + " disabled:opacity-50"}
-            >
-              <ShareIcon />
-              <span className="ctrl-label">
-                {shareBusy ? "…" : isScreenShareEnabled ? "Stop" : "Share"}
-              </span>
-            </button>
-            {/* Visually hidden rather than display:none — some mobile
-                browsers refuse to open a picker for an undisplayed input. */}
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/*"
-              className="absolute w-px h-px opacity-0 pointer-events-none -z-10"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) presentPhoto(f);
-                e.target.value = "";
-              }}
-            />
+            {iCanPublish && (
+              <TrackToggle
+                source={Track.Source.Microphone}
+                showIcon={false}
+                aria-label="Toggle microphone"
+                title="Microphone"
+                className={ctrlBtn(isMicrophoneEnabled)}
+              >
+                {isMicrophoneEnabled ? <MicIcon /> : <MicOffIcon />}
+                <span className="ctrl-label">Mic</span>
+              </TrackToggle>
+            )}
+
+            {iCanPublish && (
+              <>
+              <TrackToggle
+                source={Track.Source.Camera}
+                showIcon={false}
+                aria-label="Toggle camera"
+                title="Camera"
+                className={ctrlBtn(isCameraEnabled)}
+              >
+                {isCameraEnabled ? <CamIcon /> : <CamOffIcon />}
+                <span className="ctrl-label">Camera</span>
+              </TrackToggle>
+
+              <button
+                onClick={() => setPanel(panel === "effects" ? "none" : "effects")}
+                aria-label="Video effects and backgrounds"
+                title="Video effects and backgrounds"
+                className={ctrlBtn(
+                  panel === "effects" || effects.effect.mode !== "none"
+                )}
+              >
+                <EffectsIcon />
+                <span className="ctrl-label">Effects</span>
+              </button>
+
+              {/* Phones: flip to the rear camera to show a document or board. */}
+              {hasTwoCameras && (
+                <button
+                  onClick={flipCamera}
+                  disabled={flipBusy}
+                  aria-label="Switch camera"
+                  title="Switch between front and rear camera"
+                  className={
+                    ctrlBtn(facingMode === "environment") + " disabled:opacity-50"
+                  }
+                >
+                  <FlipCameraIcon />
+                  <span className="ctrl-label">{flipBusy ? "…" : "Flip"}</span>
+                </button>
+              )}
+
+              <button
+                onClick={toggleShare}
+                disabled={shareBusy}
+                aria-label="Share screen or present a photo"
+                title="Share your screen (on phones: present a photo)"
+                className={ctrlBtn(isScreenShareEnabled) + " disabled:opacity-50"}
+              >
+                <ShareIcon />
+                <span className="ctrl-label">
+                  {shareBusy ? "…" : isScreenShareEnabled ? "Stop" : "Share"}
+                </span>
+              </button>
+              {/* Visually hidden rather than display:none — some mobile
+                  browsers refuse to open a picker for an undisplayed input. */}
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                className="absolute w-px h-px opacity-0 pointer-events-none -z-10"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) presentPhoto(f);
+                  e.target.value = "";
+                }}
+              />
+              </>
+            )}
 
             <ReactionButton />
 
@@ -1971,6 +2022,13 @@ function PeoplePanel({
 
   // Raised hands float to the top, in the order they went up — the panel
   // doubles as the speaking queue.
+  const presenterCount = participants.filter(
+    (p) =>
+      p.identity === roles.ownerIdentity ||
+      roles.coHostIdentities.includes(p.identity) ||
+      roles.speakerIdentities.includes(p.identity)
+  ).length;
+
   const ordered = useMemo(() => {
     const place = (identity: string) => hands.order.indexOf(identity);
     return [...participants].sort((a, b) => {
@@ -2014,10 +2072,23 @@ function PeoplePanel({
       }
     >
       <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
+        {/* A webinar has two clear groups, so label them and give the audience
+            a headcount rather than a list nobody scrolls through. */}
+        {roles.mode === "webinar" && (
+          <div className="flex items-center justify-between px-2 pb-1 text-[11px] uppercase tracking-wide text-gray-400">
+            <span>
+              {roles.publisherIdentities.length} presenting ·{" "}
+              {Math.max(0, participants.length - presenterCount)} listening
+            </span>
+          </div>
+        )}
         {ordered.map((p) => {
           const name = p.name || p.identity;
           const isOwnerRow = p.identity === roles.ownerIdentity;
           const isCoHostRow = roles.coHostIdentities.includes(p.identity);
+          const isSpeakerRow = roles.speakerIdentities.includes(p.identity);
+          const canPublishRow =
+            roles.mode === "meeting" || isOwnerRow || isCoHostRow || isSpeakerRow;
           const handPlace = hands.order.indexOf(p.identity);
           // Co-hosts run the meeting but don't outrank each other or the owner.
           const canActOn =
@@ -2027,7 +2098,13 @@ function PeoplePanel({
           const canLowerHand =
             handPlace >= 0 && (roles.canManage || p.isLocal);
           const canGiveControl = control.amPresenter && !p.isLocal;
-          const showMenu = canActOn || canLowerHand || canGiveControl;
+          const canGrantSpeak =
+            roles.canManage &&
+            roles.mode === "webinar" &&
+            !isOwnerRow &&
+            !isCoHostRow;
+          const showMenu =
+            canActOn || canLowerHand || canGiveControl || canGrantSpeak;
 
           return (
             <div
@@ -2043,6 +2120,12 @@ function PeoplePanel({
                 <div className="flex items-center gap-1.5 mt-0.5">
                   {isOwnerRow && <RoleTag label="Host" />}
                   {isCoHostRow && <RoleTag label="Co-host" />}
+                  {isSpeakerRow && <RoleTag label="Speaker" />}
+                  {roles.mode === "webinar" && !canPublishRow && (
+                    <span className="text-[10px] uppercase tracking-wide text-gray-400">
+                      Listening
+                    </span>
+                  )}
                   {control.controller === p.identity && (
                     <RoleTag label="In control" />
                   )}
@@ -2119,6 +2202,22 @@ function PeoplePanel({
                           Give control
                         </MenuItem>
                       ))}
+                    {/* Webinar: hand the floor to an attendee, or take it back. */}
+                    {roles.canManage &&
+                      roles.mode === "webinar" &&
+                      !isOwnerRow &&
+                      !isCoHostRow && (
+                        <MenuItem
+                          onClick={() =>
+                            run(
+                              canPublishRow ? "revokeSpeak" : "allowSpeak",
+                              p.identity
+                            )
+                          }
+                        >
+                          {canPublishRow ? "Move to attendees" : "Allow to speak"}
+                        </MenuItem>
+                      )}
                     {canActOn && (
                       <>
                         <MenuItem onClick={() => run("mute", p.identity)}>
@@ -2462,6 +2561,12 @@ const FlipCameraIcon = () => (
   <svg {...I({})}>
     <path d="M15 10.5V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3.5l5 4v-11l-5 4Z" />
     <path d="M6.5 9.5a3 3 0 0 1 4.5-1M10.5 14.5a3 3 0 0 1-4.5 1" />
+  </svg>
+);
+const HeadphonesIcon = () => (
+  <svg {...I({ width: 15, height: 15 })}>
+    <path d="M4 14v-2a8 8 0 0 1 16 0v2" />
+    <path d="M4 14h2.5a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-5ZM20 14h-2.5a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1H19a1 1 0 0 0 1-1v-5Z" />
   </svg>
 );
 const CaptionsIcon = () => (

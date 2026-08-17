@@ -32,6 +32,16 @@ export type MeetingRole = {
   ownerId: number;
   ownerIdentity: string;
   coHostIdentities: string[];
+  /**
+   * 'meeting' — everyone can turn on mic and camera.
+   * 'webinar' — only the host, co-hosts and invited speakers publish; everyone
+   * else listens. This is what lets one room hold ~100 attendees.
+   */
+  mode: "meeting" | "webinar";
+  /** Attendees the host has let speak (webinar mode only). */
+  speakerIdentities: string[];
+  /** The caller may turn on their mic/camera and share. */
+  canPublish: boolean;
   /** The caller created this meeting. */
   isOwner: boolean;
   isCoHost: boolean;
@@ -50,19 +60,26 @@ export async function getMeetingRole(
 ): Promise<MeetingRole | null> {
   const pool = getPool();
   const [rows] = await pool.query<RowDataPacket[]>(
-    "SELECT id, host_id FROM meetings WHERE room_id = :room LIMIT 1",
+    "SELECT id, host_id, mode FROM meetings WHERE room_id = :room LIMIT 1",
     { room }
   );
   if (rows.length === 0) return null;
 
   const meetingId = rows[0].id as number;
   const ownerId = rows[0].host_id as number;
+  const mode = (rows[0].mode as MeetingRole["mode"]) ?? "meeting";
 
   const [coHosts] = await pool.query<RowDataPacket[]>(
     "SELECT user_id FROM meeting_cohosts WHERE meeting_id = :meetingId",
     { meetingId }
   );
   const coHostIds = coHosts.map((r) => r.user_id as number);
+
+  const [speakers] = await pool.query<RowDataPacket[]>(
+    "SELECT user_id FROM meeting_speakers WHERE meeting_id = :meetingId",
+    { meetingId }
+  );
+  const speakerIds = speakers.map((r) => r.user_id as number);
 
   const isOwner = ownerId === userId;
   const isCoHost = coHostIds.includes(userId);
@@ -77,14 +94,21 @@ export async function getMeetingRole(
     isParticipant = p.length > 0;
   }
 
+  const canManage = isOwner || isCoHost;
+
   return {
     meetingId,
     ownerId,
     ownerIdentity: identityFor(ownerId),
     coHostIdentities: coHostIds.map(identityFor),
+    mode,
+    speakerIdentities: speakerIds.map(identityFor),
+    // In a normal meeting everyone speaks. In a webinar only the people
+    // running it, plus anyone the host has explicitly let speak.
+    canPublish: mode === "meeting" || canManage || speakerIds.includes(userId),
     isOwner,
     isCoHost,
-    canManage: isOwner || isCoHost,
+    canManage,
     isParticipant,
   };
 }
