@@ -61,6 +61,13 @@ export class PrimaryPersonTransformer
   private maskCtx?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
   private maskImage?: ImageData;
   private background?: { image: ImageBitmap; path: string };
+  /**
+   * The background already fitted to the current frame size. It only changes
+   * when the image or the frame size does, so it's rendered once and then just
+   * copied each frame — cheaper than re-fitting (and re-blurring) every time.
+   */
+  private bgCanvas?: OffscreenCanvas | HTMLCanvasElement;
+  private bgKey = "";
 
   // Reused across frames so the hot path allocates nothing.
   private labels?: Int32Array;
@@ -125,6 +132,8 @@ export class PrimaryPersonTransformer
     if (!options.imagePath) {
       this.background?.image.close();
       this.background = undefined;
+      this.bgCanvas = undefined;
+      this.bgKey = "";
     }
   }
 
@@ -138,6 +147,8 @@ export class PrimaryPersonTransformer
     });
     this.background?.image.close();
     this.background = { image: await createImageBitmap(img), path };
+    this.bgCanvas = undefined; // force a re-fit for the new picture
+    this.bgKey = "";
   }
 
   /* ------------------------------------------------------------------ */
@@ -288,7 +299,7 @@ export class PrimaryPersonTransformer
     // 1. Background.
     if (this.background) {
       ctx.filter = "none";
-      drawCover(ctx, this.background.image, w, h);
+      ctx.drawImage(this.fittedBackground(w, h) as CanvasImageSource, 0, 0);
     } else {
       // Scale the blur with frame size so it looks the same at any resolution.
       const radius = Math.max(
@@ -331,6 +342,41 @@ export class PrimaryPersonTransformer
     // 3. Person over background.
     ctx.drawImage(this.personCanvas as CanvasImageSource, 0, 0);
   }
+
+  /**
+   * Fits the chosen image to the frame, rendered once per image/size.
+   *
+   * Plain "cover" only works when the picture is roughly the same shape as the
+   * video: a phone photo cropped to fill a 16:9 frame loses about two thirds of
+   * itself, which is what "the background doesn't fit" looks like. So when the
+   * shapes differ, the whole picture is shown centred and the space around it is
+   * filled with a blurred, zoomed copy of itself — nothing important is cut off
+   * and there are no black bars.
+   */
+  private fittedBackground(w: number, h: number) {
+    const img = this.background!.image;
+    const key = `${this.background!.path}|${w}x${h}`;
+    if (this.bgCanvas && this.bgKey === key) return this.bgCanvas;
+
+    const canvas = createCanvas(w, h);
+    const c = canvas.getContext("2d") as CanvasRenderingContext2D;
+
+    // Symmetric shape difference, so portrait-in-landscape and
+    // landscape-in-portrait are treated the same way.
+    const mismatch = Math.abs(Math.log(img.width / img.height / (w / h)));
+    if (mismatch < 0.15) {
+      drawCover(c, img, w, h);
+    } else {
+      c.filter = "blur(24px)";
+      drawCover(c, img, w, h);
+      c.filter = "none";
+      drawContain(c, img, w, h);
+    }
+
+    this.bgCanvas = canvas;
+    this.bgKey = key;
+    return canvas;
+  }
 }
 
 /* ---------------- helpers ---------------- */
@@ -341,6 +387,19 @@ function createCanvas(w: number, h: number): OffscreenCanvas | HTMLCanvasElement
   c.width = w;
   c.height = h;
   return c;
+}
+
+/** object-fit: contain — the whole picture, centred, nothing cropped. */
+function drawContain(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  img: ImageBitmap,
+  w: number,
+  h: number
+) {
+  const scale = Math.min(w / img.width, h / img.height);
+  const dw = img.width * scale;
+  const dh = img.height * scale;
+  ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
 }
 
 /** object-fit: cover, so a background image never stretches. */
