@@ -14,20 +14,45 @@ import { decodeMsg, safeSend, type Sender } from "./channel";
  *
  * State lives entirely on the clients and travels over a reliable data channel,
  * which keeps it out of the database (a raised hand is meaningless once the
- * call ends). Two details make that reliable in practice:
+ * call ends). Three details make it actually reliable:
  *
- *  - a newcomer broadcasts `sync`, and anyone currently raised answers with
- *    their own `raise`, so late joiners see the existing hands;
- *  - the raise timestamp is carried in the payload, so everyone orders the
- *    queue the same way — Teams shows who raised first.
+ *  - announcements carry the whole truth ("my hand is up/down") rather than an
+ *    edit ("I just raised it"), so they're idempotent and can be repeated;
+ *  - a raised hand is re-announced every few seconds, and a lowered one a few
+ *    times in a row. Any single lost message therefore corrects itself, instead
+ *    of leaving every other screen permanently wrong;
+ *  - a newcomer broadcasts `sync` and anyone raised answers, so late joiners
+ *    see hands that went up before they arrived.
+ *
+ * The raise timestamp travels in the payload, so everyone orders the queue the
+ * same way — Teams shows who raised first.
  */
 
 type HandMsg =
+  /** Whole truth about one person's hand. Idempotent, so it can be repeated. */
+  | { t: "state"; up: boolean; at: number }
   | { t: "raise"; at: number }
   | { t: "lower" }
   | { t: "sync" }
   | { t: "lowerFor"; identity: string }
   | { t: "lowerAll" };
+
+/**
+ * While my hand is up, say so again this often.
+ *
+ * One announcement is one chance: if it doesn't land, everyone else's screen is
+ * simply wrong for the rest of the call and nothing ever corrects it — which is
+ * what "I raise my hand and it doesn't show for everyone" looks like. Repeating
+ * an idempotent state message means any single loss heals within seconds, no
+ * matter what caused it.
+ */
+const HEARTBEAT_MS = 6000;
+/**
+ * A lowered hand is announced more than once too. Getting stuck *up* on other
+ * people's screens is the worse failure, and there's no heartbeat to fix it
+ * once my hand is down.
+ */
+const LOWER_REPEAT_MS = [0, 900, 2500];
 
 export type UseRaiseHand = {
   /** identity → the moment that hand went up. */
@@ -83,26 +108,64 @@ export function useRaiseHand(opts: {
     [commit]
   );
 
+  /** Announces my hand's state. Safe to repeat — receivers treat it as truth. */
+  const announce = useCallback((up: boolean, at: number) => {
+    safeSend(sendRef.current, { t: "state", up, at } satisfies HandMsg);
+  }, []);
+
+  // Repeated "hand is down" messages, cancelled if I raise again in between.
+  const lowerTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const clearLowerTimers = () => {
+    lowerTimers.current.forEach(clearTimeout);
+    lowerTimers.current = [];
+  };
+
   const lowerMyHand = useCallback(() => {
     if (!handsRef.current[meRef.current]) return;
     drop(meRef.current);
-    safeSend(sendRef.current, { t: "lower" } satisfies HandMsg);
-  }, [drop]);
+    clearLowerTimers();
+    lowerTimers.current = LOWER_REPEAT_MS.map((delay) =>
+      setTimeout(() => {
+        // Don't insist I'm down if I've put my hand back up since.
+        if (handsRef.current[meRef.current]) return;
+        announce(false, 0);
+      }, delay)
+    );
+  }, [drop, announce]);
 
   const raiseMyHand = useCallback(() => {
     if (handsRef.current[meRef.current]) return;
     const at = Date.now();
     commit({ ...handsRef.current, [meRef.current]: at });
-    safeSend(sendRef.current, { t: "raise", at } satisfies HandMsg);
-  }, [commit]);
+    clearLowerTimers();
+    announce(true, at);
+  }, [commit, announce]);
 
   const { send } = useDataChannel("hands", (msg) => {
     const from = msg.from?.identity;
-    if (!from) return;
+    if (!from) {
+      // Without a sender there is no hand to attribute this to. Worth a line:
+      // if it ever happens it would look exactly like the feature not working.
+      console.warn("hands: message with no sender identity, ignored");
+      return;
+    }
     const d = decodeMsg<HandMsg>(msg.payload);
     if (!d) return;
 
     switch (d.t) {
+      // The heartbeat form: carries whether the hand is up or down, so a
+      // repeat costs nothing and a missed earlier message is corrected.
+      case "state": {
+        if (d.up) {
+          if (handsRef.current[from]) return; // already up — a re-announcement
+          const at = typeof d.at === "number" && d.at > 0 ? d.at : Date.now();
+          commit({ ...handsRef.current, [from]: at });
+          onRaisedRef.current?.(from);
+        } else {
+          drop(from);
+        }
+        break;
+      }
       case "raise": {
         if (handsRef.current[from]) return; // already up — this is a re-sync
         const at = typeof d.at === "number" ? d.at : Date.now();
@@ -115,10 +178,10 @@ export function useRaiseHand(opts: {
         break;
       case "sync": {
         // A newcomer is asking who has a hand up — answer for ourselves only.
+        // Only the raised answer: with a hundred attendees, everyone replying
+        // "not me" to every join would be a lot of noise for no information.
         const mine = handsRef.current[meRef.current];
-        if (mine) {
-          safeSend(sendRef.current, { t: "raise", at: mine } satisfies HandMsg);
-        }
+        if (mine) announce(true, mine);
         break;
       }
       case "lowerFor":
@@ -129,9 +192,7 @@ export function useRaiseHand(opts: {
         break;
       case "lowerAll":
         if (!managersRef.current.includes(from)) return;
-        if (handsRef.current[meRef.current]) {
-          safeSend(sendRef.current, { t: "lower" } satisfies HandMsg);
-        }
+        if (handsRef.current[meRef.current]) announce(false, 0);
         commit({});
         break;
     }
@@ -151,6 +212,22 @@ export function useRaiseHand(opts: {
       clearTimeout(t2);
     };
   }, []);
+
+  // Keep saying so while my hand is up. This is what makes a raised hand show
+  // up for everyone even if the first announcement is lost, or if someone's
+  // client missed it while reconnecting.
+  const myHandUp = !!hands[me];
+  useEffect(() => {
+    if (!myHandUp) return;
+    const t = setInterval(() => {
+      const at = handsRef.current[meRef.current];
+      if (at) announce(true, at);
+    }, HEARTBEAT_MS);
+    return () => clearInterval(t);
+  }, [myHandUp, announce]);
+
+  // Don't leave the "hand is down" repeats pending after the call ends.
+  useEffect(() => clearLowerTimers, []);
 
   // Someone who leaves with their hand up shouldn't stay in the queue.
   useEffect(() => {
@@ -195,7 +272,7 @@ export function useRaiseHand(opts: {
   return {
     hands,
     order,
-    myHandUp: !!hands[me],
+    myHandUp,
     toggleHand,
     lowerHandFor,
     lowerAllHands,

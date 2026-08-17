@@ -41,9 +41,14 @@ export function safeSend(
     send?.(new TextEncoder().encode(JSON.stringify(value)), {
       reliable: true,
       ...options,
-    })?.catch(() => {});
-  } catch {
-    /* not connected yet */
+    })?.catch((err) => {
+      // Logged, not swallowed. A send that fails silently is why "I raised my
+      // hand and nothing happened" was impossible to tell apart from a bug in
+      // the feature itself.
+      console.warn("data channel send failed:", err);
+    });
+  } catch (err) {
+    console.warn("data channel send threw:", err);
   }
 }
 

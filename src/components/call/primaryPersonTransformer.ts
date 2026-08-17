@@ -49,13 +49,6 @@ const MASK_WORK_WIDTH = 480;
 const MASK_BLUR_PX = 2.5;
 /** Push the edge out by a hair so fine hair isn't cut off. */
 const MASK_DILATE_PX = 1;
-/**
- * How much of each frame's mask is the new one. The model re-decides every
- * frame, and its edge moves by a pixel or two even when you don't, which reads
- * as a shimmering outline. Easing between frames settles it; too low and the
- * edge lags behind real movement.
- */
-const MASK_NEW_WEIGHT = 0.6;
 
 export class PrimaryPersonTransformer
   implements VideoTrackTransformer<PrimaryPersonOptions>
@@ -86,12 +79,9 @@ export class PrimaryPersonTransformer
   /** Quarter-size scratch canvas the background blur is computed on. */
   private blurCanvas?: OffscreenCanvas | HTMLCanvasElement;
   private blurCtx?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-  /** The feathered mask, plus last frame's copy to ease against. */
+  /** The feathered mask, rebuilt each frame (no cross-frame state). */
   private softCanvas?: OffscreenCanvas | HTMLCanvasElement;
   private softCtx?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-  private prevCanvas?: OffscreenCanvas | HTMLCanvasElement;
-  private prevCtx?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-  private hasSoft = false;
 
   // Reused across frames so the hot path allocates nothing.
   private labels?: Int32Array;
@@ -347,11 +337,6 @@ export class PrimaryPersonTransformer
       this.softCtx = this.softCanvas.getContext(
         "2d"
       ) as CanvasRenderingContext2D;
-      this.prevCanvas = createCanvas(w, h);
-      this.prevCtx = this.prevCanvas.getContext(
-        "2d"
-      ) as CanvasRenderingContext2D;
-      this.hasSoft = false;
     }
     const ctx = this.softCtx!;
     const drawRaw = () =>
@@ -363,41 +348,20 @@ export class PrimaryPersonTransformer
         h + MASK_DILATE_PX * 2
       );
 
-    if (!this.hasSoft) {
-      // Nothing to ease against yet: take the new mask outright, or the person
-      // would fade in over the first few frames.
-      ctx.globalCompositeOperation = "copy";
-      ctx.globalAlpha = 1;
-      ctx.filter = `blur(${MASK_BLUR_PX}px)`;
-      drawRaw();
-    } else {
-      // A true interpolation needs two operations, because 'source-over' can
-      // only ever *add* alpha — easing with it would let the mask grow and
-      // never shrink until the whole frame was opaque. So: lay down a faded
-      // copy of last frame's mask, then *add* the new one on top at the
-      // remaining weight. 'lighter' sums the channels, so the two weights
-      // land at exactly (1-w)*previous + w*new.
-      ctx.globalCompositeOperation = "copy";
-      ctx.globalAlpha = 1 - MASK_NEW_WEIGHT;
-      ctx.filter = "none";
-      ctx.drawImage(this.prevCanvas as CanvasImageSource, 0, 0);
+    // 1. The feather: a blurred copy, soft on both sides of the silhouette.
+    ctx.globalCompositeOperation = "copy";
+    ctx.filter = `blur(${MASK_BLUR_PX}px)`;
+    drawRaw();
 
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = MASK_NEW_WEIGHT;
-      ctx.filter = `blur(${MASK_BLUR_PX}px)`;
-      drawRaw();
-    }
-
-    ctx.filter = "none";
-    ctx.globalAlpha = 1;
+    // 2. Stamp the hard mask back on top. This is what keeps the person solid:
+    //    inside the silhouette the alpha is forced back to fully opaque, and
+    //    only the ring *outside* it keeps the soft ramp. Without this the blur
+    //    lowers alpha across the body as well, and a person drawn at 70% over
+    //    a blurred copy of themselves reads as a blurred face — which is
+    //    exactly what happened when this eased between frames instead.
     ctx.globalCompositeOperation = "source-over";
-
-    // Keep this frame's result as the thing the next frame eases from.
-    const prev = this.prevCtx!;
-    prev.globalCompositeOperation = "copy";
-    prev.drawImage(this.softCanvas as CanvasImageSource, 0, 0);
-    prev.globalCompositeOperation = "source-over";
-    this.hasSoft = true;
+    ctx.filter = "none";
+    drawRaw();
 
     return this.softCanvas;
   }
