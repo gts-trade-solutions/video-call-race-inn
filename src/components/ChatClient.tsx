@@ -153,6 +153,21 @@ export default function ChatClient({ user }: { user: SessionUser }) {
     return () => clearInterval(t);
   }, [loadContacts, loadGroups]);
 
+  // /chat?user=<id> opens that thread straight away, so "Chat" from elsewhere
+  // in the app (recent calls, a profile) lands in the right conversation.
+  // Runs once: after that the user's own clicks own the selection.
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (deepLinked.current || typeof window === "undefined") return;
+    const want = Number(
+      new URLSearchParams(window.location.search).get("user")
+    );
+    if (!Number.isSafeInteger(want) || want <= 0) return;
+    deepLinked.current = true;
+    setActiveId(want);
+    setActiveGroupId(null);
+  }, []);
+
   function openGroup(id: number) {
     setActiveGroupId(id);
     setActiveId(null);

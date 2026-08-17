@@ -459,6 +459,53 @@ export function ensureSchema(): Promise<void> {
             REFERENCES users(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
+
+      // 1:1 call log behind "Recent calls". One row per (call, callee), so a
+      // call placed to five people leaves five rows — each side sees its own.
+      // Rows older than CALL_HISTORY_DAYS are deleted (see lib/callHistory).
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS call_history (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          room_id VARCHAR(64) NOT NULL,
+          caller_id INT NOT NULL,
+          callee_id INT NOT NULL,
+          mode ENUM('video','audio') NOT NULL DEFAULT 'video',
+          status ENUM('ringing','answered','missed','declined','cancelled')
+            NOT NULL DEFAULT 'ringing',
+          started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          answered_at TIMESTAMP NULL DEFAULT NULL,
+          ended_at TIMESTAMP NULL DEFAULT NULL,
+          duration_secs INT NOT NULL DEFAULT 0,
+          -- "Remove from view" is one-sided: hiding my copy of a call must not
+          -- erase it from the other person's history.
+          hidden_by_caller TINYINT(1) NOT NULL DEFAULT 0,
+          hidden_by_callee TINYINT(1) NOT NULL DEFAULT 0,
+          INDEX idx_call_caller (caller_id, started_at),
+          INDEX idx_call_callee (callee_id, started_at),
+          INDEX idx_call_room (room_id, callee_id),
+          -- The retention sweep deletes by age, so it needs its own index.
+          INDEX idx_call_started (started_at),
+          CONSTRAINT fk_call_caller FOREIGN KEY (caller_id)
+            REFERENCES users(id) ON DELETE CASCADE,
+          CONSTRAINT fk_call_callee FOREIGN KEY (callee_id)
+            REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      // "Block user": user_id refuses calls from blocked_id.
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS blocked_users (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT NOT NULL,
+          blocked_id INT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uniq_block (user_id, blocked_id),
+          CONSTRAINT fk_block_user FOREIGN KEY (user_id)
+            REFERENCES users(id) ON DELETE CASCADE,
+          CONSTRAINT fk_block_target FOREIGN KEY (blocked_id)
+            REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
     })().catch((err) => {
       // Reset so a later request can retry (e.g. DB was down at boot).
       globalForDb._schemaReady = undefined;

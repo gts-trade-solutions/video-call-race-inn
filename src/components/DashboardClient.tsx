@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SessionUser } from "@/lib/auth";
 import { Modal, ScheduleModal } from "@/components/meet/ScheduleModal";
+import RecentCalls from "@/components/RecentCalls";
 import { NOTE_TAKER_ENABLED } from "@/lib/features";
 
 type Meeting = {
@@ -235,6 +236,9 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
             ))}
           </div>
         )}
+
+        {/* Recent calls (hides itself when there's no history yet) */}
+        <RecentCalls />
 
         {/* Scheduled meetings */}
         <div className="flex items-center justify-between mt-10 mb-3 gap-3 flex-wrap">

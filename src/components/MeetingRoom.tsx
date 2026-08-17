@@ -518,6 +518,14 @@ export default function MeetingRoom({
               reason === DisconnectReason.SIGNAL_CLOSE ||
               reason === DisconnectReason.JOIN_FAILURE);
           if (!dropped) {
+            // Stamp the talk time in the call log. Fire-and-forget: the server
+            // ignores it unless this room really was a 1:1 call I was part of,
+            // and the first hang-up is the one that counts.
+            fetch("/api/calls", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "end", roomId: room }),
+            }).catch(() => {});
             setPhase("left");
             return;
           }

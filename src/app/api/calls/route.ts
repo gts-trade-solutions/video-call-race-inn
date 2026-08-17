@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { ensureSchema, getPool } from "@/lib/db";
 import { rateLimit, MINUTE } from "@/lib/rateLimit";
+import {
+  logCallEnded,
+  logCallStarted,
+  logCallStatus,
+  pruneExpiredCalls,
+} from "@/lib/callHistory";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
 export const runtime = "nodejs";
@@ -74,7 +80,12 @@ async function sweep() {
     }
     if (now - call.createdAt > KEEP_MS) store().delete(id);
   });
-  for (let i = 0; i < expired.length; i++) await recordMissed(expired[i]);
+  for (let i = 0; i < expired.length; i++) {
+    await recordMissed(expired[i]);
+    await logCallStatus(expired[i].roomId, expired[i].toId, "missed");
+  }
+  // Piggyback the retention sweep on call traffic (throttled internally).
+  await pruneExpiredCalls();
 }
 
 // GET /api/calls — the newest call currently ringing for me.
@@ -188,6 +199,19 @@ export async function POST(req: Request) {
       );
     }
 
+    // Anyone who blocked me doesn't ring, and doesn't get a log entry either.
+    const [blocks] = await pool.query<RowDataPacket[]>(
+      `SELECT user_id FROM blocked_users
+        WHERE blocked_id = :me AND user_id IN (:ids)`,
+      { me: user.id, ids: targetIds }
+    );
+    const blockedBy = new Set(blocks.map((b) => b.user_id as number));
+    targetIds = targetIds.filter((id) => !blockedBy.has(id));
+    if (targetIds.length === 0) {
+      // Deliberately vague: telling a caller they've been blocked defeats it.
+      return NextResponse.json({ ok: true, ringing: 0 });
+    }
+
     const [targets] = await pool.query<RowDataPacket[]>(
       "SELECT id, email FROM users WHERE id IN (:ids)",
       { ids: targetIds }
@@ -222,9 +246,37 @@ export async function POST(req: Request) {
         status: "ringing",
         createdAt: Date.now(),
       });
+      await logCallStarted({
+        roomId,
+        callerId: user.id,
+        calleeId: toId,
+        mode,
+      });
     }
 
     return NextResponse.json({ ok: true, ringing: targets.length });
+  }
+
+  // ---- end ----
+  // Fired when someone leaves the room, to stamp the talk time. Keyed by room
+  // rather than callId because the in-process call entry may already have been
+  // swept by then, while the log row is still open.
+  if (body.action === "end") {
+    const roomId = body.roomId;
+    if (!roomId) {
+      return NextResponse.json({ error: "roomId is required" }, { status: 400 });
+    }
+    // Only a party to the call may close it, or anyone could stop the clock on
+    // someone else's call.
+    const [mine] = await pool.query<RowDataPacket[]>(
+      `SELECT 1 FROM call_history
+        WHERE room_id = :roomId AND (caller_id = :me OR callee_id = :me)
+        LIMIT 1`,
+      { roomId, me: user.id }
+    );
+    if (mine.length === 0) return NextResponse.json({ ok: true });
+    await logCallEnded(roomId);
+    return NextResponse.json({ ok: true });
   }
 
   // ---- accept / decline / cancel ----
@@ -242,10 +294,12 @@ export async function POST(req: Request) {
     }
     if (body.action === "accept") {
       call.status = "accepted";
+      await logCallStatus(call.roomId, call.toId, "answered");
       return NextResponse.json({ ok: true, roomId: call.roomId, mode: call.mode });
     }
     call.status = "declined";
     await recordMissed(call);
+    await logCallStatus(call.roomId, call.toId, "declined");
     return NextResponse.json({ ok: true });
   }
 
@@ -253,7 +307,10 @@ export async function POST(req: Request) {
     if (call.fromId !== user.id) {
       return NextResponse.json({ error: "Not your call" }, { status: 403 });
     }
-    if (call.status === "ringing") call.status = "cancelled";
+    if (call.status === "ringing") {
+      call.status = "cancelled";
+      await logCallStatus(call.roomId, call.toId, "cancelled");
+    }
     return NextResponse.json({ ok: true });
   }
 
