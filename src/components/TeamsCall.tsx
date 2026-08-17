@@ -1422,25 +1422,76 @@ function MobileStage({
   others: TrackReferenceOrPlaceholder[];
   onPin: (identity: string) => void;
 }) {
-  return (
-    <div className="relative h-full w-full">
-      <Tile
-        trackRef={main}
-        fill
-        onPin={() => onPin(main.participant.identity)}
-      />
+  const landscape = useIsLandscape();
 
-      {others.length > 0 && (
-        <div className="absolute top-2 left-2 right-2 flex gap-2 overflow-x-auto pb-1">
-          {others.map((t) => (
-            <div key={t.participant.identity} className="w-20 shrink-0">
-              <Tile trackRef={t} compact />
-            </div>
-          ))}
+  if (others.length === 0) {
+    return (
+      <div className="relative h-full w-full">
+        <Tile trackRef={main} fill onPin={() => onPin(main.participant.identity)} />
+        {self && <SelfPip trackRef={self} />}
+      </div>
+    );
+  }
+
+  // The others get a real filmstrip that takes its own space, rather than a
+  // row of thumbnails floating over the pinned person. Two people share the
+  // strip equally; three or more get a comfortable fixed size and scroll,
+  // which is better than shrinking everyone to nothing as the call grows.
+  const share = others.length <= 2;
+  const lone = others.length === 1;
+
+  // One other person keeps a camera-shaped 4:3 box, centred. Stretching a
+  // single tile the full width would make a 2.3:1 band that crops the video to
+  // a slot. Two share the strip; three or more get a fixed size and scroll.
+  const cellClass = lone
+    ? landscape
+      ? "w-full aspect-[4/3]"
+      : "h-full aspect-[4/3]"
+    : share
+    ? "flex-1 min-w-0 min-h-0"
+    : landscape
+    ? "shrink-0 w-full h-[46%] min-h-[92px]"
+    : "shrink-0 h-full w-[42%] min-w-[132px]";
+
+  const strip = (
+    <div
+      className={`shrink-0 flex gap-[2px] bg-black ${
+        lone ? "justify-center" : ""
+      } ${
+        landscape
+          ? "flex-col w-[22%] min-w-[104px] max-w-[168px] overflow-y-auto"
+          : "h-[24%] min-h-[104px] max-h-[168px] overflow-x-auto"
+      }`}
+    >
+      {others.map((t) => (
+        <div key={t.participant.identity} className={cellClass}>
+          {/* Tapping one moves the pin to them, so switching is one tap. */}
+          <Tile
+            trackRef={t}
+            fill
+            flush
+            onPin={() => onPin(t.participant.identity)}
+          />
         </div>
-      )}
+      ))}
+    </div>
+  );
 
-      {self && <SelfPip trackRef={self} />}
+  return (
+    <div
+      className={`flex h-full w-full gap-[2px] ${
+        // Landscape puts the strip down the left: vertical space is the scarce
+        // one there, and the right side already carries the control rail.
+        landscape ? "flex-row" : "flex-col"
+      }`}
+    >
+      {landscape && strip}
+      <div className="relative flex-1 min-w-0 min-h-0">
+        <Tile trackRef={main} fill onPin={() => onPin(main.participant.identity)} />
+        {/* Inside the main area, so the PiP sits above the strip, not on it. */}
+        {self && <SelfPip trackRef={self} />}
+      </div>
+      {!landscape && strip}
     </div>
   );
 }
