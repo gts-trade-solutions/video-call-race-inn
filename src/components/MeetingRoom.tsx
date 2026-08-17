@@ -11,6 +11,8 @@ import { DisconnectReason, RoomOptions, VideoPresets } from "livekit-client";
 import TeamsCall from "@/components/TeamsCall";
 
 type Phase =
+  /** Deciding whether to show the pre-join screen or go straight in. */
+  | "resolving"
   | "prejoin"
   | "connecting"
   | "waiting"
@@ -18,6 +20,54 @@ type Phase =
   | "in-call"
   | "left"
   | "error";
+
+/**
+ * Camera/mic choices from the last time this person joined anything.
+ *
+ * Once they've been through the pre-join screen once — granting permission and
+ * picking devices — making them confirm "Join now" on every later call is just
+ * a step in the way, so we reuse the choices and connect straight away. Devices
+ * can still be changed mid-call from Effects → Settings, and `?prejoin=1`
+ * forces the screen back for anyone who wants to check themselves first.
+ */
+const JOIN_PREFS_KEY = "vc-join-prefs";
+
+type JoinPrefs = {
+  videoEnabled: boolean;
+  audioEnabled: boolean;
+  videoDeviceId?: string;
+  audioDeviceId?: string;
+};
+
+function loadJoinPrefs(): JoinPrefs | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(JOIN_PREFS_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as JoinPrefs;
+    if (typeof p?.videoEnabled !== "boolean") return null;
+    if (typeof p?.audioEnabled !== "boolean") return null;
+    return p;
+  } catch {
+    return null;
+  }
+}
+
+function saveJoinPrefs(c: LocalUserChoices) {
+  try {
+    localStorage.setItem(
+      JOIN_PREFS_KEY,
+      JSON.stringify({
+        videoEnabled: c.videoEnabled,
+        audioEnabled: c.audioEnabled,
+        videoDeviceId: c.videoDeviceId,
+        audioDeviceId: c.audioDeviceId,
+      } satisfies JoinPrefs)
+    );
+  } catch {
+    /* private mode — we'll just ask again next time */
+  }
+}
 
 export default function MeetingRoom({
   room,
@@ -31,7 +81,9 @@ export default function MeetingRoom({
   audioOnly?: boolean;
 }) {
   const router = useRouter();
-  const [phase, setPhase] = useState<Phase>("prejoin");
+  // Starts as "resolving" so the pre-join screen never flashes up before we've
+  // checked whether this person already has saved choices.
+  const [phase, setPhase] = useState<Phase>("resolving");
   // True once the room actually connected — separates "couldn't join" from
   // mid-call hiccups, which must never dump an active call onto an error page.
   const everConnected = useRef(false);
@@ -204,10 +256,35 @@ export default function MeetingRoom({
   const handlePreJoinSubmit = useCallback(
     async (values: LocalUserChoices) => {
       setChoices(values);
+      saveJoinPrefs(values);
       await connect();
     },
     [connect]
   );
+
+  // Skip "Join now" when we already know how they like to join. Runs once.
+  const autoJoinedRef = useRef(false);
+  useEffect(() => {
+    if (autoJoinedRef.current) return;
+    autoJoinedRef.current = true;
+
+    const forcePrejoin =
+      new URLSearchParams(window.location.search).get("prejoin") === "1";
+    const prefs = loadJoinPrefs();
+    if (forcePrejoin || !prefs) {
+      setPhase("prejoin");
+      return;
+    }
+    setChoices({
+      username: userName,
+      // An audio-only link always wins over a saved camera preference.
+      videoEnabled: audioOnly ? false : prefs.videoEnabled,
+      audioEnabled: prefs.audioEnabled,
+      videoDeviceId: prefs.videoDeviceId ?? "",
+      audioDeviceId: prefs.audioDeviceId ?? "",
+    } as LocalUserChoices);
+    connect();
+  }, [connect, userName, audioOnly]);
 
   // Denied guest asks to join again — reset our request to "waiting" so the
   // host is re-notified, then go back to the waiting screen.
@@ -245,7 +322,28 @@ export default function MeetingRoom({
   }, [phase, requestToken, applyTokenResult]);
 
   // ----- Pre-join lobby -----
-  if (phase === "prejoin" || phase === "connecting") {
+  // Joining straight in (or still deciding): a spinner, not a "Join now" form
+  // they'd have to dismiss.
+  if (phase === "resolving" || (phase === "connecting" && !choices)) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-[#1f1f1f] to-[#2d2c2c] flex flex-col items-center justify-center px-4">
+        <div className="w-12 h-12 rounded-full border-4 border-white/20 border-t-white animate-spin" />
+        <p className="text-gray-300 mt-5">Joining…</p>
+      </div>
+    );
+  }
+
+  if (phase === "connecting" && choices) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-[#1f1f1f] to-[#2d2c2c] flex flex-col items-center justify-center px-4">
+        <div className="w-12 h-12 rounded-full border-4 border-white/20 border-t-white animate-spin" />
+        <p className="text-gray-300 mt-5">Joining…</p>
+        <p className="text-gray-500 text-sm mt-1 font-mono">{room}</p>
+      </div>
+    );
+  }
+
+  if (phase === "prejoin") {
     return (
       <div className="min-h-screen bg-gradient-to-br from-[#1f1f1f] to-[#2d2c2c] flex flex-col items-center justify-center px-4">
         <div className="mb-6 text-center">
@@ -274,7 +372,7 @@ export default function MeetingRoom({
             defaults={preJoinDefaults}
             onSubmit={handlePreJoinSubmit}
             onError={(e) => setError(e.message)}
-            joinLabel={phase === "connecting" ? "Joining…" : "Join now"}
+            joinLabel="Join now"
           />
         </div>
         <button
@@ -359,8 +457,11 @@ export default function MeetingRoom({
           <>
             {/* Straight back in with the devices already chosen. */}
             <PrimaryBtn onClick={connect}>Rejoin</PrimaryBtn>
+            <SecondaryBtn onClick={() => setPhase("prejoin")}>
+              Change devices
+            </SecondaryBtn>
             <SecondaryBtn onClick={() => router.push("/dashboard")}>
-              Back to dashboard
+              Dashboard
             </SecondaryBtn>
           </>
         }
