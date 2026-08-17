@@ -224,14 +224,21 @@ export default function EffectsPanel({
               ))}
             </div>
 
-            {bundled.length === 0 && custom.length === 0 && (
-              <p className="text-xs text-gray-400 mt-3 leading-snug">
-                No background images yet. Use <b>Add new</b> to pick one from
-                this device, or drop three files into{" "}
-                <code className="text-gray-300">public/backgrounds/</code> named
-                bg-1.jpg, bg-2.jpg and bg-3.jpg.
-              </p>
-            )}
+            {/* The picker crops each thumbnail exactly the way the video will,
+                so the tile is an honest preview. Worth saying anyway, because a
+                phone photo loses most of its height and that surprises people
+                if they haven't been told. */}
+            <p className="text-xs text-gray-400 mt-3 leading-snug">
+              {bundled.length === 0 && custom.length === 0 ? (
+                <>
+                  No backgrounds yet — tap <b>Add new</b> to use a photo from
+                  this device.{" "}
+                </>
+              ) : null}
+              A background fills the whole frame, so wide photos work best; tall
+              ones are cropped to their middle. Each tile shows the crop you&apos;ll
+              get.
+            </p>
           </>
         )}
       </div>

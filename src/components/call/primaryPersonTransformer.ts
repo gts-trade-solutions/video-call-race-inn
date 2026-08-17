@@ -153,14 +153,24 @@ export class PrimaryPersonTransformer
 
   private async loadBackground(path: string) {
     const img = new Image();
-    img.crossOrigin = "Anonymous";
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = reject;
-      img.src = path;
-    });
-    this.background?.image.close();
-    this.background = { image: await createImageBitmap(img), path };
+    // Only for real URLs. An uploaded background is a data: URL, which is
+    // already same-origin — and asking for CORS on one can make the load fail
+    // outright, which would look like "my image doesn't work" with no clue why.
+    if (!path.startsWith("data:")) img.crossOrigin = "Anonymous";
+    try {
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () =>
+          reject(new Error(`background image failed to load: ${path.slice(0, 60)}`));
+        img.src = path;
+      });
+      this.background?.image.close();
+      this.background = { image: await createImageBitmap(img), path };
+    } catch (err) {
+      // Say so rather than failing mutely. Leaving `background` unset falls
+      // back to blur, which is a sane result for a picture we can't read.
+      console.error("primary-person: background not applied:", err);
+    }
     this.bgCanvas = undefined; // force a re-fit for the new picture
     this.bgKey = "";
   }
@@ -458,17 +468,17 @@ export class PrimaryPersonTransformer
     const canvas = createCanvas(w, h);
     const c = canvas.getContext("2d") as CanvasRenderingContext2D;
 
-    // Symmetric shape difference, so portrait-in-landscape and
-    // landscape-in-portrait are treated the same way.
-    const mismatch = Math.abs(Math.log(img.width / img.height / (w / h)));
-    if (mismatch < 0.15) {
-      drawCover(c, img, w, h);
-    } else {
-      c.filter = "blur(24px)";
-      drawCover(c, img, w, h);
-      c.filter = "none";
-      drawContain(c, img, w, h);
-    }
+    // Always fill the frame, cropping whatever doesn't fit, which is what every
+    // video app does with a virtual background.
+    //
+    // This previously showed a mismatched image whole, centred on a blurred
+    // enlargement of itself, to avoid cropping. That was the wrong call: it
+    // looks like a photo pasted onto a blurry mat rather than a background you
+    // are sitting in front of, and it's most obvious with an uploaded phone
+    // photo — exactly the case it was meant to help. There is no way to show a
+    // whole portrait photo behind landscape video; filling and cropping to the
+    // centre at least looks deliberate.
+    drawCover(c, img, w, h);
 
     this.bgCanvas = canvas;
     this.bgKey = key;
@@ -487,17 +497,6 @@ function createCanvas(w: number, h: number): OffscreenCanvas | HTMLCanvasElement
 }
 
 /** object-fit: contain — the whole picture, centred, nothing cropped. */
-function drawContain(
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  img: ImageBitmap,
-  w: number,
-  h: number
-) {
-  const scale = Math.min(w / img.width, h / img.height);
-  const dw = img.width * scale;
-  const dh = img.height * scale;
-  ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
-}
 
 /** object-fit: cover, so a background image never stretches. */
 function drawCover(
