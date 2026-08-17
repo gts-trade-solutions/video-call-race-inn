@@ -45,8 +45,22 @@ export type MeetingRoles = {
   runAction: (
     action: ParticipantAction,
     identity?: string
-  ) => Promise<string | null>;
+  ) => Promise<ActionResult>;
   busy: boolean;
+};
+
+/**
+ * What an action did, so the UI can say so. It used to return just an error
+ * string, which meant success was indistinguishable from "succeeded but there
+ * was nobody to act on" — Mute all looked broken when it had simply found
+ * nobody to mute.
+ */
+export type ActionResult = {
+  error?: string;
+  /** muteAll: how many microphones were actually turned off. */
+  muted?: number;
+  /** muteAll: how many people were eligible (hosts and co-hosts excluded). */
+  targeted?: number;
 };
 
 export function useMeetingRoles(
@@ -127,7 +141,9 @@ export function useMeetingRoles(
           body: JSON.stringify({ room, action, identity }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) return (d.error as string) || "That didn't work.";
+        if (!res.ok) {
+          return { error: (d.error as string) || "That didn't work." };
+        }
         if (
           action === "promote" ||
           action === "demote" ||
@@ -139,9 +155,12 @@ export function useMeetingRoles(
           // waiting up to 10s for the next poll.
           safeSend(sendRef.current, { t: "changed" });
         }
-        return null;
+        return {
+          muted: typeof d.muted === "number" ? d.muted : undefined,
+          targeted: typeof d.targeted === "number" ? d.targeted : undefined,
+        };
       } catch {
-        return "Network error.";
+        return { error: "Network error." };
       } finally {
         setBusy(false);
       }

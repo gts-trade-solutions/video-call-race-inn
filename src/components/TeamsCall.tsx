@@ -2175,10 +2175,32 @@ function PeoplePanel({
     });
   }, [participants, hands.order]);
 
-  const run = async (action: Parameters<MeetingRoles["runAction"]>[0], identity?: string) => {
+  const run = async (
+    action: Parameters<MeetingRoles["runAction"]>[0],
+    identity?: string
+  ) => {
     setMenuFor(null);
-    const err = await roles.runAction(action, identity);
-    if (err) onError(err);
+    const res = await roles.runAction(action, identity);
+    if (res.error) {
+      onError(res.error);
+      return;
+    }
+    // Mute all is the one action with no visible result of its own — the host
+    // can't hear the difference and the mic icons are in a list they may not be
+    // looking at. Saying what happened is the difference between "it worked"
+    // and "it's broken", especially when the honest answer is that there was
+    // nobody to mute.
+    if (action === "muteAll") {
+      const n = res.muted ?? 0;
+      const eligible = res.targeted ?? 0;
+      onError(
+        eligible === 0
+          ? "No one to mute right now."
+          : n === 0
+          ? "Everyone was already muted."
+          : `Muted ${n} ${n === 1 ? "person" : "people"}.`
+      );
+    }
   };
 
   return (

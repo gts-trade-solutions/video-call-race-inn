@@ -250,7 +250,26 @@ export async function POST(req: Request) {
     }
 
     if (action === "muteAll") {
-      const people = await client.listParticipants(room);
+      // A room only exists on the media server once someone connects, so
+      // listing throws when nobody has joined yet. That isn't an error — it's
+      // "no one to mute", and it must not fall through to the catch below,
+      // which would blame a participant this action doesn't even have.
+      let people: ParticipantInfo[] = [];
+      try {
+        people = await client.listParticipants(room);
+      } catch (err) {
+        // 'not_found' means nobody has connected yet, so there is genuinely
+        // nobody to mute — report success with a count of zero. Anything else
+        // (a bad API key gives 'invalid API key' with no code, an unreachable
+        // server gives a network error) is a real fault and must surface;
+        // swallowing it would leave a host clicking Mute all forever while
+        // being told there was no one there.
+        const code = (err as { code?: string })?.code;
+        if (code === "not_found") {
+          return NextResponse.json({ ok: true, muted: 0, targeted: 0 });
+        }
+        throw err;
+      }
       // Never mute yourself, and don't silence the people running the meeting.
       const targets = people.filter(
         (p) =>
@@ -259,10 +278,22 @@ export async function POST(req: Request) {
           !role.coHostIdentities.includes(p.identity)
       );
       let muted = 0;
+      const failed: string[] = [];
       for (const p of targets) {
-        muted += await muteSources(client, room, p, [TrackSource.MICROPHONE]);
+        try {
+          muted += await muteSources(client, room, p, [TrackSource.MICROPHONE]);
+        } catch (err) {
+          // One person leaving mid-loop shouldn't abandon everyone after them.
+          console.error(`muteAll: could not mute ${p.identity}:`, err);
+          failed.push(p.identity);
+        }
       }
-      return NextResponse.json({ ok: true, muted });
+      return NextResponse.json({
+        ok: true,
+        muted,
+        targeted: targets.length,
+        failed: failed.length,
+      });
     }
 
     // mute / stopVideo
@@ -280,9 +311,17 @@ export async function POST(req: Request) {
     const muted = await muteSources(client, room, target, sources);
     return NextResponse.json({ ok: true, muted });
   } catch (err) {
-    console.error("participant control error:", err);
+    // This used to report "that participant is no longer in the meeting" for
+    // every failure, including a bad API key or an unreachable media server,
+    // which sent anyone debugging it in the wrong direction. The action is
+    // named so the log says which one, and the message no longer claims to
+    // know the cause.
+    console.error(`participant control error (${action}):`, err);
     return NextResponse.json(
-      { error: "That participant is no longer in the meeting." },
+      {
+        error:
+          "That didn't reach the meeting — the person may have left, or the media server is unreachable.",
+      },
       { status: 409 }
     );
   }
