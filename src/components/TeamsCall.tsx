@@ -40,6 +40,7 @@ import { useVideoEffects } from "@/components/call/useVideoEffects";
 import { useRaiseHand, type UseRaiseHand } from "@/components/call/useRaiseHand";
 import { useNetworkGuard } from "@/components/call/useNetworkGuard";
 import { RELIABLE } from "@/components/call/channel";
+import { closeChimes, playHandChime } from "@/components/call/chime";
 import {
   useShareControl,
   type UseShareControl,
@@ -54,6 +55,12 @@ import {
  * stage layout. Read-only — all mutations go through the useRaiseHand hook.
  */
 const HandsContext = createContext<Record<string, number>>({});
+
+/**
+ * How long you have to keep talking before your raised hand drops by itself.
+ * Long enough that a cough or a quick "yes" doesn't count as taking the floor.
+ */
+const AUTO_LOWER_MS = 1500;
 
 type Panel = "none" | "chat" | "people" | "effects" | "notes";
 type WaitingPerson = {
@@ -174,8 +181,12 @@ export default function TeamsCall({
   const hands = useRaiseHand({
     managerIdentities: roles.managerIdentities,
     onRaised: useCallback(
-      (identity: string) =>
-        notify(`${nameOfRef.current(identity)} raised their hand`),
+      (identity: string) => {
+        notify(`${nameOfRef.current(identity)} raised their hand`);
+        // Meet plays a sound, and it earns its place: a host watching a shared
+        // screen would otherwise never notice a badge in a closed roster.
+        playHandChime();
+      },
       [notify]
     ),
   });
@@ -185,6 +196,41 @@ export default function TeamsCall({
     onNotice: notify,
   });
   const handCount = hands.order.length;
+
+  /**
+   * Raising and lowering my own hand, with the confirmations Meet gives.
+   *
+   * The toast matters on a phone, where the control bar hides on tap: without
+   * it there's no way to tell whether the button registered.
+   */
+  const toggleMyHand = useCallback(() => {
+    const wasUp = hands.myHandUp;
+    hands.toggleHand();
+    notify(wasUp ? "Hand lowered" : "You raised your hand");
+  }, [hands, notify]);
+
+  // One audio context serves the whole call; hand it back on the way out.
+  useEffect(() => closeChimes, []);
+
+  /**
+   * Meet lowers your hand once you've actually started talking, on the
+   * reasoning that you've been given the floor.
+   *
+   * The timer is the whole mechanism: it only fires if you're still speaking
+   * when it expires, because the effect re-runs (clearing it) the moment you
+   * stop. So a cough or a quick "mm-hm" can't drop a hand you still want up.
+   * It also announces itself — a hand vanishing on its own would otherwise
+   * look exactly like the bug we just spent two commits chasing.
+   */
+  useEffect(() => {
+    if (!hands.myHandUp || !localParticipant?.isSpeaking) return;
+    const t = setTimeout(() => {
+      if (!hands.myHandUp) return;
+      hands.toggleHand();
+      notify("Hand lowered — you're speaking");
+    }, AUTO_LOWER_MS);
+    return () => clearTimeout(t);
+  }, [hands, localParticipant?.isSpeaking, notify]);
 
   // Free AI-style note taking: each browser transcribes its own mic and
   // shares the text, so nothing is sent to a transcription service.
@@ -854,7 +900,7 @@ export default function TeamsCall({
               isMicrophoneEnabled={isMicrophoneEnabled}
               isCameraEnabled={isCameraEnabled}
               myHandUp={hands.myHandUp}
-              onToggleHand={hands.toggleHand}
+              onToggleHand={toggleMyHand}
               canManage={canManage}
               recording={recording}
               recBusy={recBusy}
@@ -975,14 +1021,14 @@ export default function TeamsCall({
             <ReactionButton />
 
             <button
-              onClick={hands.toggleHand}
+              onClick={toggleMyHand}
               aria-label={hands.myHandUp ? "Lower hand" : "Raise hand"}
               title={hands.myHandUp ? "Lower your hand" : "Raise your hand"}
               className={handBtn(hands.myHandUp) + " relative"}
             >
               <HandIcon raised={hands.myHandUp} />
               <span className="ctrl-label">
-                {hands.myHandUp ? "Lower" : "Raise"}
+                {hands.myHandUp ? "Lower hand" : "Raise hand"}
               </span>
               {handCount > 0 && (
                 <span
