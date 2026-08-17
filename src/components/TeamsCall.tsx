@@ -2472,8 +2472,13 @@ function CallTimer() {
   const ss = String(secs % 60).padStart(2, "0");
   const hh = Math.floor(secs / 3600);
   return (
-    <span className="flex items-center gap-1.5 text-sm text-gray-300 mr-1">
-      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+    // No status dot here: a pulsing red dot means "recording", and this is
+    // just how long the meeting has been running. The REC pill next to it owns
+    // that signal and only appears when a recording is actually going.
+    <span
+      className="flex items-center text-sm text-gray-300 mr-1 tabular-nums"
+      title="Meeting length"
+    >
       {hh > 0 ? `${hh}:` : ""}
       {mm}:{ss}
     </span>
