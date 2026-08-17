@@ -492,14 +492,47 @@ export default function TeamsCall({
     stopPhotoShare,
   ]);
 
-  // ----- Spotlight: everyone sees one person big -----
+  // ----- Pin (just me) and spotlight (the whole room) -----
+  // Teams separates these and so do we. Making one person big is normally a
+  // personal preference, so a pin stays on this device and is never sent
+  // anywhere. Moving *everyone's* view is a different thing entirely, so the
+  // broadcast spotlight belongs to whoever is running the meeting.
+
+  /** My own view only. Not shared, so no data channel is involved. */
+  const [pinned, setPinned] = useState<string | null>(null);
+  const togglePin = useCallback((identity: string) => {
+    setPinned((cur) => (cur === identity ? null : identity));
+  }, []);
+
+  /** Set by a host or co-host; changes the view for everybody. */
   const [spotlight, setSpotlight] = useState<string | null>(null);
   const { send: sendSpotlight } = useDataChannel("spotlight", (msg) => {
+    // A spotlight from someone who isn't running the meeting is ignored, so a
+    // participant can't reach in and rearrange everyone else's screen.
+    const from = msg.from?.identity;
+    if (
+      from &&
+      from !== roles.ownerIdentity &&
+      !roles.coHostIdentities.includes(from)
+    ) {
+      return;
+    }
     const v = new TextDecoder().decode(msg.payload);
     setSpotlight(v || null);
+    // Say so, rather than silently rearranging someone's screen. Only for
+    // other people's spotlights — I already know about my own.
+    if (from && from !== localParticipant.identity) {
+      const who = participants.find((x) => x.identity === v);
+      notify(
+        v
+          ? `${who?.name || who?.identity || "Someone"} was spotlighted for everyone`
+          : "Spotlight ended"
+      );
+    }
   });
   const toggleSpotlight = useCallback(
     (identity: string) => {
+      if (!canManage) return;
       setSpotlight((cur) => {
         const next = cur === identity ? null : identity;
         try {
@@ -510,8 +543,14 @@ export default function TeamsCall({
         return next;
       });
     },
-    [sendSpotlight]
+    [canManage, sendSpotlight]
   );
+
+  /**
+   * Who I actually see big. My pin wins over the room spotlight: if I've
+   * deliberately chosen someone to watch, a spotlight shouldn't yank me away.
+   */
+  const focused = pinned ?? spotlight;
 
   // ----- Waiting room: host sees who's knocking and admits/denies -----
   const [waiting, setWaiting] = useState<WaitingPerson[]>([]);
@@ -598,12 +637,13 @@ export default function TeamsCall({
     );
   }
 
-  // Focus-layout tiles for the active spotlight (if the person is still here).
-  const spotlightTile = spotlight
-    ? cameraTiles.find((t) => t.participant.identity === spotlight)
+  // Focus-layout tiles for whoever is being shown big — my pin or the room
+  // spotlight — provided that person is still in the meeting.
+  const focusedTile = focused
+    ? cameraTiles.find((t) => t.participant.identity === focused)
     : undefined;
-  const otherTiles = spotlightTile
-    ? cameraTiles.filter((t) => t.participant.identity !== spotlight)
+  const otherTiles = focusedTile
+    ? cameraTiles.filter((t) => t.participant.identity !== focused)
     : cameraTiles;
 
   // ----- Phone layout -----
@@ -617,12 +657,12 @@ export default function TeamsCall({
   const railMode = isMobile && isLandscape;
   const selfTile = cameraTiles.find((t) => t.participant.isLocal);
   const remoteTiles = cameraTiles.filter((t) => !t.participant.isLocal);
-  const mobileOthers = spotlightTile
+  const mobileOthers = focusedTile
     ? remoteTiles.filter(
-        (t) => t.participant.identity !== spotlightTile.participant.identity
+        (t) => t.participant.identity !== focusedTile.participant.identity
       )
     : remoteTiles;
-  const mobileGridActive = isMobile && !isSharing && !spotlightTile;
+  const mobileGridActive = isMobile && !isSharing && !focusedTile;
 
   // On a phone the call chrome (header + control bar) hides on tap so the
   // video really is full-screen; tapping again brings it back.
@@ -715,32 +755,32 @@ export default function TeamsCall({
                 nameOf={nameOf}
               />
             ) : mobileGridActive ? (
-              <MobileGrid tiles={cameraTiles} onSpotlight={toggleSpotlight} />
-            ) : isMobile && spotlightTile ? (
+              <MobileGrid tiles={cameraTiles} onPin={togglePin} />
+            ) : isMobile && focusedTile ? (
               <MobileStage
-                main={spotlightTile}
+                main={focusedTile}
                 self={
                   // Don't repeat yourself in the PiP if you're already the big tile.
                   selfTile &&
                   selfTile.participant.identity !==
-                    spotlightTile.participant.identity
+                    focusedTile.participant.identity
                     ? selfTile
                     : undefined
                 }
                 others={mobileOthers}
-                onSpotlight={toggleSpotlight}
+                onPin={togglePin}
               />
-            ) : spotlightTile ? (
+            ) : focusedTile ? (
               <SpotlightLayout
-                main={spotlightTile}
+                main={focusedTile}
                 others={otherTiles}
-                onSpotlight={toggleSpotlight}
+                onPin={togglePin}
               />
             ) : (
               <GridStage
                 tiles={cameraTiles}
-                spotlight={spotlight}
-                onSpotlight={toggleSpotlight}
+                focusedIdentity={focused}
+                onPin={togglePin}
               />
             )}
 
@@ -784,6 +824,8 @@ export default function TeamsCall({
                   roles={roles}
                   hands={hands}
                   control={shareControl}
+                  spotlight={spotlight}
+                  onSpotlightAll={toggleSpotlight}
                   onError={notify}
                 />
               )}
@@ -1261,10 +1303,10 @@ function useIsLandscape() {
  */
 function MobileGrid({
   tiles,
-  onSpotlight,
+  onPin,
 }: {
   tiles: TrackReferenceOrPlaceholder[];
-  onSpotlight: (identity: string) => void;
+  onPin: (identity: string) => void;
 }) {
   const landscape = useIsLandscape();
   const self = tiles.find((t) => t.participant.isLocal);
@@ -1289,7 +1331,7 @@ function MobileGrid({
           trackRef={t}
           fill
           flush
-          onSpotlight={() => onSpotlight(t.participant.identity)}
+          onPin={() => onPin(t.participant.identity)}
         />
       </div>
     );
@@ -1356,7 +1398,7 @@ function MobileGrid({
             trackRef={t}
             fill
             flush
-            onSpotlight={() => onSpotlight(t.participant.identity)}
+            onPin={() => onPin(t.participant.identity)}
           />
         </div>
       ))}
@@ -1365,7 +1407,7 @@ function MobileGrid({
 }
 
 /**
- * Teams-style spotlight layout on phones: the spotlighted person fills the
+ * Teams-style spotlight layout on phones: the focused person fills the
  * screen, your own camera sits in a small floating PiP, and any other
  * participants run along a compact strip at the top.
  */
@@ -1373,19 +1415,19 @@ function MobileStage({
   main,
   self,
   others,
-  onSpotlight,
+  onPin,
 }: {
   main: TrackReferenceOrPlaceholder;
   self?: TrackReferenceOrPlaceholder;
   others: TrackReferenceOrPlaceholder[];
-  onSpotlight: (identity: string) => void;
+  onPin: (identity: string) => void;
 }) {
   return (
     <div className="relative h-full w-full">
       <Tile
         trackRef={main}
         fill
-        onSpotlight={() => onSpotlight(main.participant.identity)}
+        onPin={() => onPin(main.participant.identity)}
       />
 
       {others.length > 0 && (
@@ -1435,12 +1477,12 @@ function SelfPip({
 
 function GridStage({
   tiles,
-  spotlight,
-  onSpotlight,
+  focusedIdentity,
+  onPin,
 }: {
   tiles: TrackReferenceOrPlaceholder[];
-  spotlight: string | null;
-  onSpotlight: (identity: string) => void;
+  focusedIdentity: string | null;
+  onPin: (identity: string) => void;
 }) {
   const cols = useMemo(() => {
     const n = tiles.length;
@@ -1465,8 +1507,8 @@ function GridStage({
           key={t.participant.identity}
           trackRef={t}
           fill
-          spotlighted={spotlight === t.participant.identity}
-          onSpotlight={() => onSpotlight(t.participant.identity)}
+          focused={focusedIdentity === t.participant.identity}
+          onPin={() => onPin(t.participant.identity)}
         />
       ))}
     </div>
@@ -1476,11 +1518,11 @@ function GridStage({
 function SpotlightLayout({
   main,
   others,
-  onSpotlight,
+  onPin,
 }: {
   main: TrackReferenceOrPlaceholder;
   others: TrackReferenceOrPlaceholder[];
-  onSpotlight: (identity: string) => void;
+  onPin: (identity: string) => void;
 }) {
   return (
     <div className="flex flex-col lg:flex-row gap-3 h-full">
@@ -1488,8 +1530,8 @@ function SpotlightLayout({
         <Tile
           trackRef={main}
           fill
-          spotlighted
-          onSpotlight={() => onSpotlight(main.participant.identity)}
+          focused
+          onPin={() => onPin(main.participant.identity)}
         />
       </div>
       {others.length > 0 && (
@@ -1499,7 +1541,7 @@ function SpotlightLayout({
               <Tile
                 trackRef={t}
                 compact
-                onSpotlight={() => onSpotlight(t.participant.identity)}
+                onPin={() => onPin(t.participant.identity)}
               />
             </div>
           ))}
@@ -1778,8 +1820,8 @@ function Tile({
   compact,
   fill,
   flush,
-  spotlighted,
-  onSpotlight,
+  focused,
+  onPin,
 }: {
   trackRef: TrackReferenceOrPlaceholder;
   compact?: boolean;
@@ -1787,8 +1829,8 @@ function Tile({
   fill?: boolean;
   /** Edge-to-edge phone grid: square corners, badge-style mute indicator. */
   flush?: boolean;
-  spotlighted?: boolean;
-  onSpotlight?: () => void;
+  focused?: boolean;
+  onPin?: () => void;
 }) {
   const p = trackRef.participant;
   const isSpeaking = useIsSpeaking(p);
@@ -1816,11 +1858,11 @@ function Tile({
         // Flush tiles keep the speaking indicator inside their box so the
         // edge-to-edge grid stays perfectly seamless.
         flush ? "rounded-none ring-inset" : "rounded-xl"
-      } ${spotlighted ? "ring-teams-purple" : "ring-transparent"}`}
+      } ${focused ? "ring-teams-purple" : "ring-transparent"}`}
     >
       {/* Speaking outline as its own layer: only its opacity animates, so the
           tile underneath is never repainted. */}
-      {isSpeaking && !spotlighted && (
+      {isSpeaking && !focused && (
         <span
           aria-hidden
           className={`speak-outline pointer-events-none absolute inset-0 z-10 ${
@@ -1849,21 +1891,24 @@ function Tile({
           {handPlace}
         </span>
       )}
-      {onSpotlight && (
+      {onPin && (
         <button
           onClick={(e) => {
             // Don't let the tap fall through to the stage's chrome toggle.
             e.stopPropagation();
-            onSpotlight();
+            onPin();
           }}
-          title={spotlighted ? "Stop spotlight" : "Spotlight for everyone"}
+          // "for me" is the whole point: this button only changes my own view.
+          // Spotlighting for the room lives in the People panel, host-only.
+          title={focused ? "Unpin" : `Pin ${p.isLocal ? "myself" : name} for me`}
+          aria-label={focused ? "Unpin" : "Pin for me"}
           className={`spot-reveal absolute top-2 right-2 z-10 rounded-md p-1.5 text-white transition-opacity ${
-            spotlighted
+            focused
               ? "bg-teams-purple"
               : "bg-black/50 hover:bg-black/70 opacity-0 group-hover:opacity-100 focus:opacity-100"
           }`}
         >
-          <SpotlightIcon active={spotlighted} />
+          <PinIcon active={focused} />
         </button>
       )}
       {hasVideo ? (
@@ -2015,6 +2060,8 @@ function PeoplePanel({
   roles,
   hands,
   control,
+  spotlight,
+  onSpotlightAll,
   onError,
 }: {
   participants: Participant[];
@@ -2022,6 +2069,10 @@ function PeoplePanel({
   roles: MeetingRoles;
   hands: UseRaiseHand;
   control: UseShareControl;
+  /** Who the room is currently spotlighted on, if anyone. */
+  spotlight: string | null;
+  /** Broadcast a spotlight to everyone. Host/co-host only. */
+  onSpotlightAll: (identity: string) => void;
   onError: (text: string) => void;
 }) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -2186,6 +2237,20 @@ function PeoplePanel({
                         }}
                       >
                         Lower hand
+                      </MenuItem>
+                    )}
+                    {/* The only action here that changes what *other* people
+                        see, which is why it is restricted and says so. */}
+                    {roles.canManage && (
+                      <MenuItem
+                        onClick={() => {
+                          onSpotlightAll(p.identity);
+                          setMenuFor(null);
+                        }}
+                      >
+                        {spotlight === p.identity
+                          ? "Stop spotlight"
+                          : "Spotlight for everyone"}
                       </MenuItem>
                     )}
                     {canGiveControl &&
@@ -2551,6 +2616,12 @@ const EffectsIcon = () => (
 const SpotlightIcon = ({ active }: { active?: boolean }) => (
   <svg {...I({ width: 15, height: 15, fill: active ? "currentColor" : "none" })}>
     <path d="M12 2l2.9 6.26L21 9.27l-4.5 4.38L17.8 21 12 17.27 6.2 21l1.3-7.35L3 9.27l6.1-1.01L12 2Z" />
+  </svg>
+);
+// A drawing pin, to keep "pin for me" visually distinct from the host's star.
+const PinIcon = ({ active }: { active?: boolean }) => (
+  <svg {...I({ width: 15, height: 15, fill: active ? "currentColor" : "none" })}>
+    <path d="M9 4h6M12 4v7M12 11l-4.5 5h9L12 11ZM12 16v4" />
   </svg>
 );
 // The real ✋ reads instantly (and matches Teams) where a line-art hand didn't.
