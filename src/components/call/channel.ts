@@ -25,6 +25,12 @@ export function decodeMsg<T>(payload: Uint8Array): T | null {
 /**
  * Sends without throwing (or rejecting) when the room is mid-reconnect — the
  * state re-syncs on the next sync request anyway.
+ *
+ * Reliable by default, and that default matters: LiveKit's publishData treats a
+ * missing `reliable` as *lossy*, so everything here was being sent on the
+ * unreliable channel and could vanish without a trace. A dropped cursor frame
+ * is replaced 40ms later, but a dropped "hand raised" or chat message is simply
+ * lost. Anything genuinely disposable opts out with `{ reliable: false }`.
  */
 export function safeSend(
   send: Sender | null | undefined,
@@ -32,10 +38,14 @@ export function safeSend(
   options: DataPublishOptions = {}
 ) {
   try {
-    send?.(new TextEncoder().encode(JSON.stringify(value)), options)?.catch(
-      () => {}
-    );
+    send?.(new TextEncoder().encode(JSON.stringify(value)), {
+      reliable: true,
+      ...options,
+    })?.catch(() => {});
   } catch {
     /* not connected yet */
   }
 }
+
+/** The publish options for state that must not be silently dropped. */
+export const RELIABLE: DataPublishOptions = { reliable: true };

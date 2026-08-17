@@ -39,10 +39,23 @@ export type PrimaryPersonOptions = {
 
 /** Below this share of the frame a blob is noise (a hand, a reflection). */
 const MIN_BLOB_FRACTION = 0.004;
-/** Cheap dilation of the kept shape so hair edges aren't clipped. */
-const MASK_FEATHER_PX = 2;
 /** Blur is computed at 1/N size and scaled back up — see composite(). */
 const BLUR_DOWNSCALE = 4;
+
+/* ---- Edge quality (see featheredMask) ---- */
+/** The mask is refined at this width before being stretched to the frame. */
+const MASK_WORK_WIDTH = 480;
+/** Feather radius, in mask-working pixels. */
+const MASK_BLUR_PX = 2.5;
+/** Push the edge out by a hair so fine hair isn't cut off. */
+const MASK_DILATE_PX = 1;
+/**
+ * How much of each frame's mask is the new one. The model re-decides every
+ * frame, and its edge moves by a pixel or two even when you don't, which reads
+ * as a shimmering outline. Easing between frames settles it; too low and the
+ * edge lags behind real movement.
+ */
+const MASK_NEW_WEIGHT = 0.6;
 
 export class PrimaryPersonTransformer
   implements VideoTrackTransformer<PrimaryPersonOptions>
@@ -73,6 +86,12 @@ export class PrimaryPersonTransformer
   /** Quarter-size scratch canvas the background blur is computed on. */
   private blurCanvas?: OffscreenCanvas | HTMLCanvasElement;
   private blurCtx?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  /** The feathered mask, plus last frame's copy to ease against. */
+  private softCanvas?: OffscreenCanvas | HTMLCanvasElement;
+  private softCtx?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  private prevCanvas?: OffscreenCanvas | HTMLCanvasElement;
+  private prevCtx?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  private hasSoft = false;
 
   // Reused across frames so the hot path allocates nothing.
   private labels?: Int32Array;
@@ -296,6 +315,93 @@ export class PrimaryPersonTransformer
     return this.maskCanvas!;
   }
 
+  /**
+   * Turns the raw mask into one with a usable edge.
+   *
+   * The model's mask is binary at 256x144. Stretching that straight to 1080p is
+   * a 7.5x blow-up of a hard step, so every edge arrives as a visible
+   * staircase — and because the model re-decides each frame independently, the
+   * staircase also crawls. Two cheap passes fix both:
+   *
+   *  - refine at an intermediate width, where the upscale resolves the
+   *    staircase into a ramp, then blur it into a real feather. The radius is
+   *    small enough that the body stays fully opaque and only the boundary
+   *    softens, so this reads as an anti-aliased edge rather than a haze.
+   *  - ease against the previous frame's mask. Drawing the new one at partial
+   *    alpha over the kept canvas *is* the interpolation, so it costs one draw
+   *    and no extra buffer.
+   *
+   * The edge is also pushed out by a pixel: at the true boundary the feather
+   * sits near 50%, which would make fine hair half-transparent.
+   */
+  private featheredMask(
+    raw: OffscreenCanvas | HTMLCanvasElement,
+    frameW: number,
+    frameH: number
+  ) {
+    const w = Math.min(MASK_WORK_WIDTH, frameW);
+    const h = Math.max(2, Math.round((w * frameH) / frameW));
+
+    if (!this.softCanvas || this.softCanvas.width !== w || this.softCanvas.height !== h) {
+      this.softCanvas = createCanvas(w, h);
+      this.softCtx = this.softCanvas.getContext(
+        "2d"
+      ) as CanvasRenderingContext2D;
+      this.prevCanvas = createCanvas(w, h);
+      this.prevCtx = this.prevCanvas.getContext(
+        "2d"
+      ) as CanvasRenderingContext2D;
+      this.hasSoft = false;
+    }
+    const ctx = this.softCtx!;
+    const drawRaw = () =>
+      ctx.drawImage(
+        raw as CanvasImageSource,
+        -MASK_DILATE_PX,
+        -MASK_DILATE_PX,
+        w + MASK_DILATE_PX * 2,
+        h + MASK_DILATE_PX * 2
+      );
+
+    if (!this.hasSoft) {
+      // Nothing to ease against yet: take the new mask outright, or the person
+      // would fade in over the first few frames.
+      ctx.globalCompositeOperation = "copy";
+      ctx.globalAlpha = 1;
+      ctx.filter = `blur(${MASK_BLUR_PX}px)`;
+      drawRaw();
+    } else {
+      // A true interpolation needs two operations, because 'source-over' can
+      // only ever *add* alpha — easing with it would let the mask grow and
+      // never shrink until the whole frame was opaque. So: lay down a faded
+      // copy of last frame's mask, then *add* the new one on top at the
+      // remaining weight. 'lighter' sums the channels, so the two weights
+      // land at exactly (1-w)*previous + w*new.
+      ctx.globalCompositeOperation = "copy";
+      ctx.globalAlpha = 1 - MASK_NEW_WEIGHT;
+      ctx.filter = "none";
+      ctx.drawImage(this.prevCanvas as CanvasImageSource, 0, 0);
+
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = MASK_NEW_WEIGHT;
+      ctx.filter = `blur(${MASK_BLUR_PX}px)`;
+      drawRaw();
+    }
+
+    ctx.filter = "none";
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+
+    // Keep this frame's result as the thing the next frame eases from.
+    const prev = this.prevCtx!;
+    prev.globalCompositeOperation = "copy";
+    prev.drawImage(this.softCanvas as CanvasImageSource, 0, 0);
+    prev.globalCompositeOperation = "source-over";
+    this.hasSoft = true;
+
+    return this.softCanvas;
+  }
+
   /** Blurred-or-replaced background with the primary person laid over it. */
   private composite(
     frame: VideoFrame,
@@ -355,14 +461,14 @@ export class PrimaryPersonTransformer
     pctx.filter = "none";
     pctx.drawImage(frame as unknown as CanvasImageSource, 0, 0, w, h);
     pctx.globalCompositeOperation = "destination-in";
-    // Scaling the small mask up is bilinear, which softens the edge for free;
-    // a slight outward stretch stops hair being clipped.
+    // The mask arrives already feathered and eased (featheredMask), so this is
+    // a plain stretch — the softness is in the mask, not in this upscale.
     pctx.drawImage(
-      maskCanvas as CanvasImageSource,
-      -MASK_FEATHER_PX,
-      -MASK_FEATHER_PX,
-      w + MASK_FEATHER_PX * 2,
-      h + MASK_FEATHER_PX * 2
+      this.featheredMask(maskCanvas, w, h) as CanvasImageSource,
+      0,
+      0,
+      w,
+      h
     );
     pctx.globalCompositeOperation = "source-over";
 

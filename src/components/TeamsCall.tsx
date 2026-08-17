@@ -39,6 +39,7 @@ import EffectsPanel from "@/components/call/EffectsPanel";
 import { useVideoEffects } from "@/components/call/useVideoEffects";
 import { useRaiseHand, type UseRaiseHand } from "@/components/call/useRaiseHand";
 import { useNetworkGuard } from "@/components/call/useNetworkGuard";
+import { RELIABLE } from "@/components/call/channel";
 import {
   useShareControl,
   type UseShareControl,
@@ -283,7 +284,7 @@ export default function TeamsCall({
       } else {
         setRecording(next);
         try {
-          sendRecPing(new TextEncoder().encode(next ? "1" : "0"), {});
+          sendRecPing(new TextEncoder().encode(next ? "1" : "0"), RELIABLE);
         } catch {
           /* ignore */
         }
@@ -311,7 +312,7 @@ export default function TeamsCall({
   const sendReaction = useCallback(
     (emoji: string) => {
       try {
-        sendReactionData(new TextEncoder().encode(emoji), {});
+        sendReactionData(new TextEncoder().encode(emoji), RELIABLE);
       } catch {
         /* ignore */
       }
@@ -540,7 +541,7 @@ export default function TeamsCall({
       setSpotlight((cur) => {
         const next = cur === identity ? null : identity;
         try {
-          sendSpotlight(new TextEncoder().encode(next ?? ""), {});
+          sendSpotlight(new TextEncoder().encode(next ?? ""), RELIABLE);
         } catch {
           /* ignore */
         }
@@ -977,14 +978,21 @@ export default function TeamsCall({
               onClick={hands.toggleHand}
               aria-label={hands.myHandUp ? "Lower hand" : "Raise hand"}
               title={hands.myHandUp ? "Lower your hand" : "Raise your hand"}
-              className={ctrlBtn(hands.myHandUp) + " relative"}
+              className={handBtn(hands.myHandUp) + " relative"}
             >
               <HandIcon raised={hands.myHandUp} />
               <span className="ctrl-label">
                 {hands.myHandUp ? "Lower" : "Raise"}
               </span>
               {handCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-amber-400 text-black text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">
+                <span
+                  // Amber on amber would vanish once the button lights up.
+                  className={`absolute -top-1 -right-1 text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center ${
+                    hands.myHandUp
+                      ? "bg-teams-stage text-white"
+                      : "bg-amber-400 text-black"
+                  }`}
+                >
                   {handCount > 9 ? "9+" : handCount}
                 </span>
               )}
@@ -1031,7 +1039,7 @@ export default function TeamsCall({
                 <CaptionsIcon />
                 <span className="ctrl-label">Notes</span>
                 {captions.on && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-teams-purple ring-2 ring-teams-stage" />
+                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-teams-stage" />
                 )}
               </button>
             )}
@@ -1146,9 +1154,14 @@ function ControlRail({
       <button
         onClick={onToggleHand}
         aria-label={myHandUp ? "Lower hand" : "Raise hand"}
-        className={railBtn(myHandUp)}
+        // Amber when raised, matching the portrait control bar.
+        className={
+          myHandUp
+            ? "w-11 h-11 rounded-full flex items-center justify-center transition bg-amber-400 text-black"
+            : railBtn(false)
+        }
       >
-        <HandIcon />
+        <HandIcon raised={myHandUp} />
       </button>
       <button
         onClick={() => setMoreOpen((o) => !o)}
@@ -1722,7 +1735,7 @@ function ShareLayout({
           control.pings.map((p) => (
             <span
               key={p.id}
-              className="pointer-events-none absolute w-10 h-10 -ml-5 -mt-5 rounded-full border-2 border-teams-purple control-ping"
+              className="pointer-events-none absolute w-10 h-10 -ml-5 -mt-5 rounded-full border-2 border-white control-ping"
               style={{
                 left: box.left + p.x * box.width,
                 top: box.top + p.y * box.height,
@@ -1924,7 +1937,7 @@ function Tile({
         // Flush tiles keep the speaking indicator inside their box so the
         // edge-to-edge grid stays perfectly seamless.
         flush ? "rounded-none ring-inset" : "rounded-xl"
-      } ${focused ? "ring-teams-purple" : "ring-transparent"}`}
+      } ${focused ? "ring-white" : "ring-transparent"}`}
     >
       {/* Speaking outline as its own layer: only its opacity animates, so the
           tile underneath is never repainted. */}
@@ -2078,7 +2091,7 @@ function ChatPanel({
         {messages.map((m) => (
           <div key={m.id} className={m.mine ? "text-right" : "text-left"}>
             {!m.mine && (
-              <div className="text-xs text-teams-purple font-medium">
+              <div className="text-xs text-gray-300 font-medium">
                 {m.sender}
               </div>
             )}
@@ -2104,7 +2117,7 @@ function ChatPanel({
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Type a message"
-          className="flex-1 rounded-md bg-white/10 px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-teams-purple placeholder:text-gray-400"
+          className="flex-1 rounded-md bg-white/10 px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-white placeholder:text-gray-400"
         />
         <button
           type="submit"
@@ -2186,7 +2199,7 @@ function PeoplePanel({
             <button
               onClick={() => run("muteAll")}
               disabled={roles.busy}
-              className="text-xs font-medium text-teams-purple hover:underline disabled:opacity-50"
+              className="text-xs font-medium text-white hover:underline disabled:opacity-50"
             >
               Mute all
             </button>
@@ -2264,7 +2277,7 @@ function PeoplePanel({
                 {!p.isMicrophoneEnabled ? (
                   <MicOffMini />
                 ) : p.isSpeaking ? (
-                  <span className="text-teams-purple">
+                  <span className="text-amber-300">
                     <SpeakingBars />
                   </span>
                 ) : (
@@ -2393,9 +2406,17 @@ function PeoplePanel({
   );
 }
 
+/**
+ * "HOST" / "CO-HOST" / "SPEAKER" beside a name in the roster.
+ *
+ * These used the accent colour as *text*, which stopped working the moment the
+ * accent became near-black: on the dark panel that measured 1.22:1, so the
+ * labels were essentially invisible. Light-on-dark instead, which reads at
+ * 8.5:1 and — unlike an accent-derived colour — can't be broken by rebranding.
+ */
 function RoleTag({ label }: { label: string }) {
   return (
-    <span className="text-[10px] uppercase tracking-wide font-semibold text-teams-purple bg-teams-purple/15 border border-teams-purple/30 rounded px-1.5 py-0.5">
+    <span className="text-[10px] uppercase tracking-wide font-semibold text-white bg-white/15 border border-white/25 rounded px-1.5 py-0.5">
       {label}
     </span>
   );
@@ -2439,13 +2460,13 @@ function LobbyBanner({
     <div className="fixed top-16 right-3 sm:right-4 z-40 w-80 max-w-[92vw] bg-teams-stage border border-white/15 rounded-xl shadow-2xl overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2.5 bg-teams-purple/20 border-b border-white/10">
         <span className="text-sm font-semibold flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-teams-purple animate-pulse" />
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
           {waiting.length} waiting to join
         </span>
         {waiting.length > 1 && (
           <button
             onClick={onAdmitAll}
-            className="text-xs font-medium text-teams-purple hover:underline"
+            className="text-xs font-medium text-white hover:underline"
           >
             Admit all
           </button>
@@ -2514,7 +2535,7 @@ function ReactionButton() {
 
   function react(emoji: string) {
     try {
-      send(new TextEncoder().encode(emoji), {});
+      send(new TextEncoder().encode(emoji), RELIABLE);
     } catch {
       /* ignore */
     }
@@ -2629,6 +2650,20 @@ function ctrlBtn(active: boolean) {
     CTRL_SHAPE,
     active
       ? "bg-teams-purple text-white hover:bg-teams-purpleDark"
+      : "bg-white/5 text-gray-200 hover:bg-white/15",
+  ].join(" ");
+}
+
+/**
+ * The raise-hand button. A raised hand is amber rather than the accent colour,
+ * the way Teams does it: it's the one control whose state other people are
+ * waiting on, so it should read across the room and not blend into the rail.
+ */
+function handBtn(raised: boolean) {
+  return [
+    CTRL_SHAPE,
+    raised
+      ? "bg-amber-400 text-black hover:bg-amber-300"
       : "bg-white/5 text-gray-200 hover:bg-white/15",
   ].join(" ");
 }
