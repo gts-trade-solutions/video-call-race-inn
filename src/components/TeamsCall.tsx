@@ -189,6 +189,7 @@ export default function TeamsCall({
   nameOfRef.current = nameOf;
 
   const hands = useRaiseHand({
+    room,
     managerIdentities: roles.managerIdentities,
     onRaised: useCallback(
       (identity: string) => {

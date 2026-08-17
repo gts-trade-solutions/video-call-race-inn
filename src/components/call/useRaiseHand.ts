@@ -12,19 +12,18 @@ import { decodeMsg, safeSend, type Sender } from "./channel";
 /**
  * Teams-style "raise your hand".
  *
- * State lives entirely on the clients and travels over a reliable data channel,
- * which keeps it out of the database (a raised hand is meaningless once the
- * call ends). Three details make it actually reliable:
+ * The server holds the truth (see api/meetings/hands) and every client polls it.
+ * Data-channel messages still go out, and when they arrive they're instant — but
+ * they are only a shortcut now, not the state.
  *
- *  - announcements carry the whole truth ("my hand is up/down") rather than an
- *    edit ("I just raised it"), so they're idempotent and can be repeated;
- *  - a raised hand is re-announced every few seconds, and a lowered one a few
- *    times in a row. Any single lost message therefore corrects itself, instead
- *    of leaving every other screen permanently wrong;
- *  - a newcomer broadcasts `sync` and anyone raised answers, so late joiners
- *    see hands that went up before they arrived.
+ * That split exists because it had to. The channel version was correct on paper:
+ * reliable delivery, idempotent "my hand is up/down" messages rather than edits,
+ * a heartbeat to heal a lost packet, and a sync handshake for late joiners. A
+ * raised hand still failed to appear for anyone else, three attempts running, and
+ * the transport can't be observed from outside the browser. Polling a value that
+ * can be read back and verified beats a faster mechanism nobody can debug.
  *
- * The raise timestamp travels in the payload, so everyone orders the queue the
+ * The raise timestamp comes from the server, so everyone orders the queue the
  * same way — Teams shows who raised first.
  */
 
@@ -67,7 +66,12 @@ export type UseRaiseHand = {
   lowerAllHands: () => void;
 };
 
+/** How often to reconcile with the server's copy of who has a hand up. */
+const POLL_MS = 2500;
+
 export function useRaiseHand(opts: {
+  /** The meeting id, for the server-side hand state. */
+  room: string;
   /** Identities allowed to lower other people's hands. */
   managerIdentities: string[];
   /** Fired when someone else raises a hand (for the notification toast). */
@@ -108,10 +112,34 @@ export function useRaiseHand(opts: {
     [commit]
   );
 
-  /** Announces my hand's state. Safe to repeat — receivers treat it as truth. */
-  const announce = useCallback((up: boolean, at: number) => {
-    safeSend(sendRef.current, { t: "state", up, at } satisfies HandMsg);
-  }, []);
+  /**
+   * Tells the server, and announces over the data channel.
+   *
+   * The POST is what makes it true for everyone: the channel message is only a
+   * shortcut so the other side doesn't wait for its next poll.
+   */
+  const roomRef = useRef(opts.room);
+  roomRef.current = opts.room;
+
+  const post = useCallback(
+    (body: Record<string, unknown>) =>
+      fetch("/api/meetings/hands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room: roomRef.current, ...body }),
+      }).catch((err) => {
+        console.warn("hands: could not reach the server:", err);
+      }),
+    []
+  );
+
+  const announce = useCallback(
+    (up: boolean, at: number) => {
+      safeSend(sendRef.current, { t: "state", up, at } satisfies HandMsg);
+      post({ up });
+    },
+    [post]
+  );
 
   // Repeated "hand is down" messages, cancelled if I raise again in between.
   const lowerTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -213,6 +241,57 @@ export function useRaiseHand(opts: {
     };
   }, []);
 
+  /**
+   * Reconcile with the server. This is the mechanism that actually makes a
+   * raised hand appear for everyone — the data channel is just the fast path,
+   * and when it fails silently this is what corrects the room within a couple
+   * of seconds.
+   *
+   * The server's map replaces ours wholesale, but only when it differs, since
+   * swapping the object every poll would re-render the whole call several times
+   * a minute for nothing.
+   */
+  useEffect(() => {
+    if (!opts.room) return;
+    let stop = false;
+
+    const pull = async () => {
+      try {
+        const res = await fetch(
+          `/api/meetings/hands?room=${encodeURIComponent(opts.room)}`
+        );
+        if (!res.ok || stop) return;
+        const d = (await res.json()) as { hands?: Record<string, number> };
+        const next = d.hands ?? {};
+        if (stop) return;
+
+        const cur = handsRef.current;
+        const same =
+          Object.keys(next).length === Object.keys(cur).length &&
+          Object.keys(next).every((k) => cur[k] === next[k]);
+        if (same) return;
+
+        // Anyone newly raised (other than me) deserves the same notification a
+        // data-channel message would have produced.
+        Object.keys(next).forEach((identity) => {
+          if (identity !== meRef.current && !cur[identity]) {
+            onRaisedRef.current?.(identity);
+          }
+        });
+        commit(next);
+      } catch {
+        /* transient — the next poll picks it up */
+      }
+    };
+
+    pull();
+    const t = setInterval(pull, POLL_MS);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, [opts.room, commit]);
+
   // Keep saying so while my hand is up. This is what makes a raised hand show
   // up for everyone even if the first announcement is lost, or if someone's
   // client missed it while reconnecting.
@@ -247,6 +326,8 @@ export function useRaiseHand(opts: {
       }
       drop(identity);
       safeSend(sendRef.current, { t: "lowerFor", identity } satisfies HandMsg);
+      // Without this the next poll would simply put the hand back.
+      post({ up: false, identity });
     },
     [drop, lowerMyHand]
   );
@@ -254,7 +335,8 @@ export function useRaiseHand(opts: {
   const lowerAllHands = useCallback(() => {
     commit({});
     safeSend(sendRef.current, { t: "lowerAll" } satisfies HandMsg);
-  }, [commit]);
+    post({ up: false, all: true });
+  }, [commit, post]);
 
   const toggleHand = useCallback(() => {
     if (handsRef.current[meRef.current]) lowerMyHand();
