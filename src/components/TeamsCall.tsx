@@ -12,6 +12,7 @@ import {
 import {
   useTracks,
   useParticipants,
+  useRoomContext,
   useLocalParticipant,
   useDataChannel,
   useTrackMutedIndicator,
@@ -62,6 +63,13 @@ const HandsContext = createContext<Record<string, number>>({});
  */
 const AUTO_LOWER_MS = 1500;
 
+/**
+ * How long to stay in a two-person call after being left alone, before ending
+ * it. Long enough that the other side reconnecting from a blip does not read as
+ * them hanging up.
+ */
+const ALONE_GRACE_MS = 4000;
+
 type Panel = "none" | "chat" | "people" | "effects" | "notes";
 type WaitingPerson = {
   userId: number;
@@ -104,6 +112,8 @@ export default function TeamsCall({
   const [panel, setPanel] = useState<Panel>("none");
   const [copied, setCopied] = useState(false);
   const participants = useParticipants();
+  // The LiveKit Room object. Named apart from the `room` prop, which is the id.
+  const lkRoom = useRoomContext();
   const {
     isMicrophoneEnabled,
     isCameraEnabled,
@@ -211,6 +221,34 @@ export default function TeamsCall({
 
   // One audio context serves the whole call; hand it back on the way out.
   useEffect(() => closeChimes, []);
+
+  /**
+   * A two-person call ends for both people when either one hangs up.
+   *
+   * Only when the room has never held more than two: in a larger meeting being
+   * briefly alone is normal — the others are on their way, or stepped out — and
+   * closing the room on the last person there would be wrong. A one-to-one call
+   * is different, and behaves like a phone call.
+   *
+   * The short wait matters. A participant who drops and reconnects also
+   * disappears for a moment, and hanging up on them would turn a hiccup into an
+   * ended call.
+   */
+  const peakParticipants = useRef(1);
+  peakParticipants.current = Math.max(
+    peakParticipants.current,
+    participants.length
+  );
+  useEffect(() => {
+    if (isWebinar) return;
+    if (peakParticipants.current !== 2 || participants.length !== 1) return;
+    const t = setTimeout(() => {
+      notify("The other person left — ending the call");
+      // Give the toast a beat to be seen before the screen changes.
+      setTimeout(() => lkRoom.disconnect().catch(() => {}), 900);
+    }, ALONE_GRACE_MS);
+    return () => clearTimeout(t);
+  }, [participants.length, isWebinar, lkRoom, notify]);
 
   /**
    * Meet lowers your hand once you've actually started talking, on the

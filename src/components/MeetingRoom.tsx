@@ -9,6 +9,7 @@ import {
 } from "@livekit/components-react";
 import { DisconnectReason, RoomOptions, VideoPresets } from "livekit-client";
 import TeamsCall from "@/components/TeamsCall";
+import { loadStoredEffect } from "@/components/call/useVideoEffects";
 
 type Phase =
   /** Deciding whether to show the pre-join screen or go straight in. */
@@ -140,15 +141,27 @@ export default function MeetingRoom({
       2
     );
 
+    // A background effect segments and re-renders every single frame on this
+    // device, and that cost scales with the pixel count — 1080p is 2.25x the
+    // work of 720p. So the capture size follows whether an effect is on:
+    // sharpest when the camera is raw, cheaper when something has to process
+    // every frame. Phones stay at 720p either way.
+    //
+    // The previous 720p-everywhere cap is why a two-person call looked soft: on
+    // a call that size the other person fills a large tile, so the top layer is
+    // exactly the one being displayed.
+    const onPhone =
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 639px), (hover: none)").matches;
+    const effectOn = loadStoredEffect().mode !== "none";
+    const top = onPhone || effectOn ? VideoPresets.h720 : VideoPresets.h1080;
+
     return {
       adaptiveStream: { pixelDensity: density },
       dynacast: true,
       videoCaptureDefaults: {
         deviceId: choices?.videoDeviceId ?? undefined,
-        // 720p everywhere. Capturing 1080p only to publish a 720p top layer
-        // wastes encoder time — and on a phone, or with background blur
-        // running, that lost time shows up as dropped frames.
-        resolution: VideoPresets.h720.resolution,
+        resolution: top.resolution,
       },
       audioCaptureDefaults: {
         deviceId: choices?.audioDeviceId ?? undefined,
@@ -157,17 +170,23 @@ export default function MeetingRoom({
         autoGainControl: true,
       },
       publishDefaults: {
-        // 720p is the top rung for camera on every device. 1080p sounds better
-        // but costs 3 Mbps on its own, and publishing 360p+720p+1080p together
-        // is over 5 Mbps up from every participant — enough to saturate an
-        // ordinary connection and make video freeze every few seconds for
-        // everyone watching. 720p is visually close and less than half the cost.
-        videoEncoding: VideoPresets.h720.encoding,
+        videoEncoding: top.encoding,
         // Only three layers ever go out (LiveKit publishes low, mid and the
-        // capture size), so the two we name decide what a mid-size tile gets.
-        // Under a 720p top these give 180p/360p/720p: a rung near every real
-        // tile size, and no 360p-to-1080p hole for mid tiles to fall down.
-        videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+        // capture size), so the two named here decide what a mid-size tile gets.
+        // Each ladder keeps a rung near every real tile size, with no wide gap
+        // for a mid tile to fall down: 360/720/1080, or 180/360/720 under a
+        // 720p top.
+        //
+        // The 1080p ladder costs ~5 Mbps up if the link can carry all three
+        // layers. That was previously paired with maintain-resolution, which
+        // held resolution and dropped frames instead — the freezing. It is now
+        // 'balanced' (shed resolution, keep motion) and useNetworkGuard caps
+        // what we *request* when the link struggles, so the ceiling is a
+        // ceiling rather than a demand.
+        videoSimulcastLayers:
+          top === VideoPresets.h1080
+            ? [VideoPresets.h360, VideoPresets.h720]
+            : [VideoPresets.h180, VideoPresets.h360],
         // Shared screens are mostly text. 2.5 Mbps (the default) smears small
         // type.
         screenShareEncoding: {
