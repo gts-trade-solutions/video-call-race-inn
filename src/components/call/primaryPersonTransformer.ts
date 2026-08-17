@@ -49,6 +49,8 @@ const MASK_WORK_WIDTH = 480;
 const MASK_BLUR_PX = 2.5;
 /** Push the edge out by a hair so fine hair isn't cut off. */
 const MASK_DILATE_PX = 1;
+/** Consecutive failed frames before the transform disables itself entirely. */
+const MAX_FAILURES = 8;
 
 export class PrimaryPersonTransformer
   implements VideoTrackTransformer<PrimaryPersonOptions>
@@ -86,6 +88,18 @@ export class PrimaryPersonTransformer
   // Reused across frames so the hot path allocates nothing.
   private labels?: Int32Array;
   private queue?: Int32Array;
+
+  /**
+   * Consecutive frames where segmentation failed. Past the limit the whole
+   * transform gives up for good and passes the camera through untouched.
+   *
+   * Retrying forever is what turns one broken component into unusable video:
+   * a segmenter that starts but can't run produces black or half-composited
+   * frames on every single frame. Soft video with no effect is a bad outcome;
+   * a black or flickering picture is a worse one.
+   */
+  private failures = 0;
+  private givenUp = false;
 
   constructor(options: PrimaryPersonOptions) {
     this.options = options;
@@ -175,6 +189,24 @@ export class PrimaryPersonTransformer
     this.bgKey = "";
   }
 
+  /**
+   * Records a failed frame and, past the limit, stops processing for good.
+   * A handful in a row means the segmenter isn't going to recover, and the
+   * camera must keep working regardless.
+   */
+  private noteFailure(why: string) {
+    this.failures += 1;
+    if (this.failures === 1 || this.failures === MAX_FAILURES) {
+      console.error(
+        `primary-person: frame ${this.failures} failed (${why})` +
+          (this.failures >= MAX_FAILURES
+            ? " — giving up, passing the camera through unprocessed"
+            : "")
+      );
+    }
+    if (this.failures >= MAX_FAILURES) this.givenUp = true;
+  }
+
   /* ------------------------------------------------------------------ */
 
   transform(frame: VideoFrame, controller: TransformStreamDefaultController) {
@@ -182,6 +214,7 @@ export class PrimaryPersonTransformer
 
     if (
       this.options.disabled ||
+      this.givenUp ||
       !this.ctx ||
       !this.canvas ||
       !this.segmenter ||
@@ -207,14 +240,19 @@ export class PrimaryPersonTransformer
       result = this.segmenter.segmentForVideo(frame, performance.now());
       const mask = result?.categoryMask;
       if (!mask) {
+        // A segmenter that runs but returns nothing is broken, not idle.
+        this.noteFailure("segmentation returned no mask");
         passthrough();
         return;
       }
       const alpha = this.primaryPersonAlpha(mask);
+      // No alpha is legitimate — nobody big enough in frame — so it doesn't
+      // count against the failure budget, it just means nothing to cut out.
       if (!alpha) {
         passthrough();
         return;
       }
+      this.failures = 0;
       this.composite(frame, alpha, w, h);
       controller.enqueue(
         new VideoFrame(this.canvas as CanvasImageSource, {
@@ -223,7 +261,7 @@ export class PrimaryPersonTransformer
       );
       frame.close();
     } catch (err) {
-      console.error("primary-person transform failed:", err);
+      this.noteFailure(String(err));
       passthrough();
       return;
     } finally {

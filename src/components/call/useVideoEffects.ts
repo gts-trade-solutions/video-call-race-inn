@@ -48,6 +48,49 @@ const ASSET_PATHS = {
 
 const STORAGE_KEY = "vc-video-effect";
 
+/**
+ * Are the segmentation assets actually on this server?
+ *
+ * public/mediapipe/wasm is ~19 MB, so it's gitignored and recreated by
+ * scripts/copy-mediapipe.mjs on install and prebuild. A deploy that skips that
+ * step — a build run outside `npm run build`, or an install that didn't reach
+ * postinstall — therefore has the model but not the runtime. The processor still
+ * starts in that state and renders BLACK FRAMES, which is a far worse failure
+ * than not offering the effect at all.
+ *
+ * So check first, once per page. Missing assets now mean "effects unavailable",
+ * and the caller falls back to the untouched camera.
+ */
+let assetsReachable: Promise<boolean> | null = null;
+function effectAssetsAvailable(): Promise<boolean> {
+  if (assetsReachable) return assetsReachable;
+  const urls = [
+    ASSET_PATHS.modelAssetPath,
+    // The fileset picks simd or nosimd at runtime; either one being served is
+    // enough to know the directory was copied.
+    `${ASSET_PATHS.tasksVisionFileSet}/vision_wasm_internal.wasm`,
+  ];
+  assetsReachable = Promise.all(
+    urls.map((u) =>
+      fetch(u, { method: "HEAD" })
+        .then((r) => r.ok)
+        .catch(() => false)
+    )
+  )
+    .then((oks) => {
+      const ok = oks.every(Boolean);
+      if (!ok) {
+        console.error(
+          "video effects unavailable: missing segmentation assets under /mediapipe. " +
+            "Run `node scripts/copy-mediapipe.mjs` (or a full `npm run build`) on the server."
+        );
+      }
+      return ok;
+    })
+    .catch(() => false);
+  return assetsReachable;
+}
+
 function livekitMode(e: VideoEffect) {
   return e.mode === "blur"
     ? ({ mode: "background-blur", blurRadius: BLUR_RADIUS } as const)
@@ -129,6 +172,9 @@ export async function applyEffectToTrack(
     }
     // Nothing attached and nothing to do.
     if (effect.mode === "none") return true;
+
+    // Never attach a processor that can't segment: that's the black-frame case.
+    if (!(await effectAssetsAvailable())) return false;
 
     const proc = newProcessor(effect);
     procRef.current = proc;
