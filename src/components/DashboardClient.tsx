@@ -256,16 +256,6 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <a
-                    href={`/api/meetings/ics?roomId=${encodeURIComponent(
-                      m.roomId
-                    )}`}
-                    title="Download calendar invite (.ics)"
-                    className="text-sm border border-teams-line hover:bg-white rounded-md px-3 py-1.5 inline-flex items-center gap-1.5"
-                  >
-                    <CalIcon />
-                    <span className="hidden sm:inline">Invite (.ics)</span>
-                  </a>
                   {NOTE_TAKER_ENABLED && (
                     <>
                       <a
