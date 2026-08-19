@@ -51,6 +51,57 @@ export type MeetingRole = {
   isParticipant: boolean;
 };
 
+
+/**
+ * Role lookups are cached in process, because they sit on every hot path.
+ *
+ * Each poll from each participant — raised hands, role checks, recording state —
+ * resolves the caller's role, and that is four SQL queries every time. At a
+ * hundred people in a room that is well over a hundred queries a second asking
+ * the same unchanging questions: who hosts this meeting, who are the co-hosts,
+ * who may speak.
+ *
+ * Room-level facts are shared by everyone in the room, so they're cached per
+ * room; whether *you* are a participant is cached per person. Both are dropped
+ * explicitly the moment something changes them (see invalidateMeetingRole), so
+ * the TTL is only a backstop for changes made outside this process — never the
+ * thing correctness rests on.
+ */
+type RoomFacts = {
+  meetingId: number;
+  ownerId: number;
+  mode: MeetingRole["mode"];
+  coHostIds: number[];
+  speakerIds: number[];
+  at: number;
+};
+
+const ROOM_TTL_MS = 15_000;
+/** Participation only ever turns on, so it can be held much longer. */
+const PARTICIPANT_TTL_MS = 5 * 60_000;
+
+const roleCache = globalThis as unknown as {
+  _roomFacts?: Map<string, RoomFacts>;
+  _isParticipant?: Map<string, number>;
+};
+
+function roomFacts(): Map<string, RoomFacts> {
+  if (!roleCache._roomFacts) roleCache._roomFacts = new Map();
+  return roleCache._roomFacts;
+}
+function participantSeen(): Map<string, number> {
+  if (!roleCache._isParticipant) roleCache._isParticipant = new Map();
+  return roleCache._isParticipant;
+}
+
+/**
+ * Drops the cached facts for a room. Call after anything that changes who runs
+ * it or who may speak, so the very next request sees the change.
+ */
+export function invalidateMeetingRole(room: string) {
+  roomFacts().delete(room);
+}
+
 /**
  * Resolves the caller's role in `room`, or null when the meeting doesn't exist.
  */
@@ -59,39 +110,58 @@ export async function getMeetingRole(
   userId: number
 ): Promise<MeetingRole | null> {
   const pool = getPool();
-  const [rows] = await pool.query<RowDataPacket[]>(
-    "SELECT id, host_id, mode FROM meetings WHERE room_id = :room LIMIT 1",
-    { room }
-  );
-  if (rows.length === 0) return null;
+  const now = Date.now();
 
-  const meetingId = rows[0].id as number;
-  const ownerId = rows[0].host_id as number;
-  const mode = (rows[0].mode as MeetingRole["mode"]) ?? "meeting";
+  let facts = roomFacts().get(room);
+  if (!facts || now - facts.at > ROOM_TTL_MS) {
+    const [rows] = await pool.query<RowDataPacket[]>(
+      "SELECT id, host_id, mode FROM meetings WHERE room_id = :room LIMIT 1",
+      { room }
+    );
+    if (rows.length === 0) return null;
 
-  const [coHosts] = await pool.query<RowDataPacket[]>(
-    "SELECT user_id FROM meeting_cohosts WHERE meeting_id = :meetingId",
-    { meetingId }
-  );
-  const coHostIds = coHosts.map((r) => r.user_id as number);
+    const meetingId = rows[0].id as number;
+    const [coHosts] = await pool.query<RowDataPacket[]>(
+      "SELECT user_id FROM meeting_cohosts WHERE meeting_id = :meetingId",
+      { meetingId }
+    );
+    const [speakers] = await pool.query<RowDataPacket[]>(
+      "SELECT user_id FROM meeting_speakers WHERE meeting_id = :meetingId",
+      { meetingId }
+    );
 
-  const [speakers] = await pool.query<RowDataPacket[]>(
-    "SELECT user_id FROM meeting_speakers WHERE meeting_id = :meetingId",
-    { meetingId }
-  );
-  const speakerIds = speakers.map((r) => r.user_id as number);
+    facts = {
+      meetingId,
+      ownerId: rows[0].host_id as number,
+      mode: (rows[0].mode as MeetingRole["mode"]) ?? "meeting",
+      coHostIds: coHosts.map((r) => r.user_id as number),
+      speakerIds: speakers.map((r) => r.user_id as number),
+      at: now,
+    };
+    roomFacts().set(room, facts);
+  }
 
+  const { meetingId, ownerId, mode, coHostIds, speakerIds } = facts;
   const isOwner = ownerId === userId;
   const isCoHost = coHostIds.includes(userId);
 
   let isParticipant = isOwner || isCoHost;
   if (!isParticipant) {
-    const [p] = await pool.query<RowDataPacket[]>(
-      `SELECT 1 FROM meeting_participants
-        WHERE meeting_id = :meetingId AND user_id = :userId LIMIT 1`,
-      { meetingId, userId }
-    );
-    isParticipant = p.length > 0;
+    // Only positives are cached. Someone who hasn't joined yet may join a
+    // second later, and must not be locked out by a stale "no".
+    const key = room + ":" + userId;
+    const seenAt = participantSeen().get(key);
+    if (seenAt && now - seenAt < PARTICIPANT_TTL_MS) {
+      isParticipant = true;
+    } else {
+      const [p] = await pool.query<RowDataPacket[]>(
+        `SELECT 1 FROM meeting_participants
+          WHERE meeting_id = :meetingId AND user_id = :userId LIMIT 1`,
+        { meetingId, userId }
+      );
+      isParticipant = p.length > 0;
+      if (isParticipant) participantSeen().set(key, now);
+    }
   }
 
   const canManage = isOwner || isCoHost;

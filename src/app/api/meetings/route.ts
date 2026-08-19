@@ -16,7 +16,31 @@ import type { ResultSetHeader, RowDataPacket } from "mysql2";
 export const dynamic = "force-dynamic";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MAX_INVITEES = 50;
+/**
+ * Invitees per meeting. Raised from 50 so a webinar audience can actually be
+ * invited — 50 was below the ~100 the webinar mode is built for, which made the
+ * feature unreachable from the scheduling dialog.
+ *
+ * Everything downstream is written in batches rather than one-at-a-time, so the
+ * cost of a large invite list is a handful of queries and a paced run of emails
+ * instead of hundreds of round trips.
+ */
+const MAX_INVITEES = 300;
+/** Emails in flight at once. Enough to be quick, gentle enough for SES. */
+const EMAIL_CONCURRENCY = 8;
+
+/** Runs `work` over `items` a few at a time, preserving result order. */
+async function inBatches<T, R>(
+  items: T[],
+  size: number,
+  work: (item: T) => Promise<R>
+): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(...(await Promise.all(items.slice(i, i + size).map(work))));
+  }
+  return out;
+}
 
 /**
  * Normalises the request's invitee list: trims, lowercases, dedupes, drops
@@ -107,8 +131,9 @@ export async function POST(req: Request) {
     }
 
     await pool.query<ResultSetHeader>(
-      `INSERT INTO meetings (room_id, title, host_id, scheduled_at, duration_mins, mode)
-       VALUES (:roomId, :title, :hostId, :scheduledAt, :durationMins, :mode)`,
+      `INSERT INTO meetings
+         (room_id, title, host_id, scheduled_at, duration_mins, mode, lobby_enabled)
+       VALUES (:roomId, :title, :hostId, :scheduledAt, :durationMins, :mode, :lobby)`,
       {
         roomId,
         title,
@@ -116,6 +141,10 @@ export async function POST(req: Request) {
         scheduledAt: scheduledSql,
         durationMins,
         mode,
+        // A webinar audience is the point of a webinar. Vetting a hundred
+        // arrivals one at a time isn't a workflow, so webinars start open and
+        // the host can switch the waiting room on from inside the meeting.
+        lobby: mode === "webinar" ? 0 : 1,
       }
     );
 
@@ -140,15 +169,15 @@ export async function POST(req: Request) {
         users.map((u) => [String(u.email).toLowerCase(), u.id as number])
       );
 
-      for (const email of invitees) {
-        await pool.query<ResultSetHeader>(
-          `INSERT INTO meeting_invites (meeting_id, email, user_id)
-           VALUES (:meetingId, :email, :userId)
-           ON DUPLICATE KEY UPDATE user_id = :userId`,
-          { meetingId, email, userId: idByEmail.get(email) ?? null }
-        );
-        invited += 1;
-      }
+      // One statement for the whole list: at 300 invitees the previous
+      // query-per-invitee was 300 sequential round trips.
+      await pool.query<ResultSetHeader>(
+        `INSERT INTO meeting_invites (meeting_id, email, user_id)
+         VALUES ?
+         ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)`,
+        [invitees.map((email) => [meetingId, email, idByEmail.get(email) ?? null])]
+      );
+      invited = invitees.length;
 
       const origin = appOrigin(req);
 
@@ -170,38 +199,32 @@ export async function POST(req: Request) {
               }) + " (UTC)"
             : "now";
         const notice = `📅 ${user.name} invited you to "${title}" — ${when}. Join: ${origin}/meeting/${roomId}`;
-        await Promise.all(
-          registeredIds.map((rid) =>
-            pool
-              .query<ResultSetHeader>(
-                `INSERT INTO messages (sender_id, recipient_id, body)
-                 VALUES (:from, :to, :body)`,
-                { from: user.id, to: rid, body: notice }
-              )
-              .catch(() => {
-                /* a failed nudge must not fail scheduling */
-              })
+        // One statement for the lot — a nudge each is not worth 300 inserts.
+        await pool
+          .query<ResultSetHeader>(
+            "INSERT INTO messages (sender_id, recipient_id, body) VALUES ?",
+            [registeredIds.map((rid) => [user.id, rid, notice])]
           )
-        );
+          .catch(() => {
+            /* a failed nudge must not fail scheduling */
+          });
       }
 
-      const results = await Promise.all(
-        invitees.map((email) =>
-          sendInviteEmail({
-            to: email,
-            hostName: user.name,
-            origin,
-            meeting: {
-              roomId,
-              title,
-              scheduledAt:
-                scheduledAt && !Number.isNaN(scheduledAt.getTime())
-                  ? scheduledAt
-                  : null,
-              durationMins,
-            },
-          }).catch(() => false)
-        )
+      const results = await inBatches(invitees, EMAIL_CONCURRENCY, (email) =>
+        sendInviteEmail({
+          to: email,
+          hostName: user.name,
+          origin,
+          meeting: {
+            roomId,
+            title,
+            scheduledAt:
+              scheduledAt && !Number.isNaN(scheduledAt.getTime())
+                ? scheduledAt
+                : null,
+            durationMins,
+          },
+        }).catch(() => false)
       );
       emailed = results.filter(Boolean).length;
       if (emailed > 0) {

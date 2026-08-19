@@ -66,12 +66,25 @@ export type UseRaiseHand = {
   lowerAllHands: () => void;
 };
 
-/** How often to reconcile with the server's copy of who has a hand up. */
-const POLL_MS = 2500;
+/**
+ * How often to reconcile with the server's copy of who has a hand up.
+ *
+ * Every participant polls, so this interval is multiplied by the headcount: at
+ * 2.5s a hundred people generate 40 requests a second on their own. A large
+ * room backs off, because in a room that size a hand is a queue position rather
+ * than a live conversational cue, and two seconds either way costs nothing.
+ */
+function pollIntervalFor(headcount: number) {
+  if (headcount > 100) return 10_000;
+  if (headcount > 30) return 6000;
+  return 2500;
+}
 
 export function useRaiseHand(opts: {
   /** The meeting id, for the server-side hand state. */
   room: string;
+  /** How many people are in the room, so polling can scale with it. */
+  headcount: number;
   /** Identities allowed to lower other people's hands. */
   managerIdentities: string[];
   /** Fired when someone else raises a hand (for the notification toast). */
@@ -251,6 +264,10 @@ export function useRaiseHand(opts: {
    * swapping the object every poll would re-render the whole call several times
    * a minute for nothing.
    */
+  // Read through a ref so a person joining doesn't restart the timer.
+  const headcountRef = useRef(opts.headcount);
+  headcountRef.current = opts.headcount;
+
   useEffect(() => {
     if (!opts.room) return;
     let stop = false;
@@ -285,7 +302,7 @@ export function useRaiseHand(opts: {
     };
 
     pull();
-    const t = setInterval(pull, POLL_MS);
+    const t = setInterval(pull, pollIntervalFor(headcountRef.current));
     return () => {
       stop = true;
       clearInterval(t);

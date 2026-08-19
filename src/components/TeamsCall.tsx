@@ -199,6 +199,7 @@ export default function TeamsCall({
 
   const hands = useRaiseHand({
     room,
+    headcount: participants.length,
     managerIdentities: roles.managerIdentities,
     onRaised: useCallback(
       (identity: string) => {
@@ -393,7 +394,9 @@ export default function TeamsCall({
 
   useEffect(() => {
     refreshRecording();
-    const t = setInterval(refreshRecording, 6000);
+    // Recording starts and stops a couple of times a meeting at most, and
+    // every participant polls this. 15s is still prompt and costs 2.5x less.
+    const t = setInterval(refreshRecording, 15_000);
     return () => clearInterval(t);
   }, [refreshRecording]);
 
@@ -653,6 +656,7 @@ export default function TeamsCall({
 
   // ----- Waiting room: host sees who's knocking and admits/denies -----
   const [waiting, setWaiting] = useState<WaitingPerson[]>([]);
+  const [lobbyEnabled, setLobbyEnabled] = useState(true);
   // Ids we've just admitted/denied. A poll already in flight returns the
   // pre-decision snapshot and would otherwise make the person pop back into
   // the list. Entries clear shortly after, so a later re-knock still shows.
@@ -666,6 +670,7 @@ export default function TeamsCall({
       );
       if (res.ok) {
         const d = await res.json();
+        if (typeof d.lobbyEnabled === "boolean") setLobbyEnabled(d.lobbyEnabled);
         const list: WaitingPerson[] = Array.isArray(d.waiting) ? d.waiting : [];
         const next = list.filter((p) => !decidedRef.current.has(p.userId));
         // Usually nobody is waiting; keeping the same array avoids re-rendering
@@ -688,6 +693,34 @@ export default function TeamsCall({
     const t = setInterval(refreshLobby, 4000);
     return () => clearInterval(t);
   }, [canManage, refreshLobby]);
+
+  /**
+   * Turn the waiting room on or off. The reason this is worth a control rather
+   * than a fixed policy: vetting arrivals is right for a small meeting and
+   * impossible for a large one, and only the host knows which they're running.
+   */
+  const setLobby = useCallback(
+    async (enabled: boolean) => {
+      setLobbyEnabled(enabled); // optimistic
+      try {
+        const res = await fetch("/api/livekit/lobby", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ room, action: "setLobby", enabled }),
+        });
+        if (!res.ok) throw new Error();
+        notify(
+          enabled
+            ? "Waiting room on — new people need admitting"
+            : "Waiting room off — anyone with the link joins straight away"
+        );
+      } catch {
+        setLobbyEnabled(!enabled);
+        notify("Could not change the waiting room.");
+      }
+    },
+    [room, notify]
+  );
 
   const decideLobby = useCallback(
     async (userId: number, action: "admit" | "deny") => {
@@ -937,6 +970,8 @@ export default function TeamsCall({
                   control={shareControl}
                   spotlight={spotlight}
                   onSpotlightAll={toggleSpotlight}
+                  lobbyEnabled={lobbyEnabled}
+                  onSetLobby={setLobby}
                   onError={notify}
                 />
               )}
@@ -2236,6 +2271,8 @@ function PeoplePanel({
   control,
   spotlight,
   onSpotlightAll,
+  lobbyEnabled,
+  onSetLobby,
   onError,
 }: {
   participants: Participant[];
@@ -2247,6 +2284,9 @@ function PeoplePanel({
   spotlight: string | null;
   /** Broadcast a spotlight to everyone. Host/co-host only. */
   onSpotlightAll: (identity: string) => void;
+  /** Whether newcomers have to be admitted. */
+  lobbyEnabled: boolean;
+  onSetLobby: (enabled: boolean) => void;
   onError: (text: string) => void;
 }) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -2313,6 +2353,17 @@ function PeoplePanel({
                 Lower all
               </button>
             )}
+            <button
+              onClick={() => onSetLobby(!lobbyEnabled)}
+              title={
+                lobbyEnabled
+                  ? "People joining by link wait to be admitted"
+                  : "Anyone with the link joins straight away"
+              }
+              className="text-xs font-medium text-white hover:underline"
+            >
+              {lobbyEnabled ? "Waiting room: on" : "Waiting room: off"}
+            </button>
             <button
               onClick={() => run("muteAll")}
               disabled={roles.busy}

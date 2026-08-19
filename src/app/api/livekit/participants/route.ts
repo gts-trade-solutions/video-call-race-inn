@@ -7,7 +7,7 @@ import {
 import { getSession } from "@/lib/auth";
 import { ensureSchema, getPool } from "@/lib/db";
 import type { ResultSetHeader } from "mysql2";
-import { getMeetingRole, userIdFromIdentity } from "@/lib/meetingRoles";
+import { getMeetingRole, userIdFromIdentity, invalidateMeetingRole } from "@/lib/meetingRoles";
 import { roomService } from "@/lib/livekitAdmin";
 
 export const runtime = "nodejs";
@@ -156,6 +156,8 @@ export async function POST(req: Request) {
         { meetingId: role.meetingId, userId: targetId }
       );
     }
+    // The cached role facts for this room now name the wrong co-hosts.
+    invalidateMeetingRole(room);
     return NextResponse.json({ ok: true });
   }
 
@@ -222,6 +224,7 @@ export async function POST(req: Request) {
       }
     }
 
+    invalidateMeetingRole(room);
     return NextResponse.json({ ok: true, canPublish: allow });
   }
 

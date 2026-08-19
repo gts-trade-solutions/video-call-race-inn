@@ -25,6 +25,12 @@ export async function GET(req: Request) {
   }
 
   const pool = getPool();
+  const [meeting] = await pool.query<RowDataPacket[]>(
+    "SELECT lobby_enabled FROM meetings WHERE id = :mid LIMIT 1",
+    { mid: m.meetingId }
+  );
+  const lobbyEnabled = !!meeting[0]?.lobby_enabled;
+
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT la.user_id AS userId, u.name, u.avatar_url AS avatarUrl,
             la.created_at AS since
@@ -35,7 +41,7 @@ export async function GET(req: Request) {
     { mid: m.meetingId }
   );
 
-  return NextResponse.json({ host: true, waiting: rows });
+  return NextResponse.json({ host: true, waiting: rows, lobbyEnabled });
 }
 
 // POST /api/livekit/lobby { room, userId, action: "admit" | "deny" }
@@ -44,16 +50,26 @@ export async function POST(req: Request) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  let body: { room?: string; userId?: number; action?: string };
+  let body: {
+    room?: string;
+    userId?: number;
+    action?: string;
+    /** For action 'setLobby': whether newcomers should have to be admitted. */
+    enabled?: boolean;
+  };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
   const { room, userId, action } = body;
-  if (!room || !userId || (action !== "admit" && action !== "deny")) {
+  const isSetLobby = action === "setLobby";
+  if (!room || (!isSetLobby && (!userId || (action !== "admit" && action !== "deny")))) {
     return NextResponse.json(
-      { error: "room, userId and action ('admit' | 'deny') are required" },
+      {
+        error:
+          "room plus either action 'setLobby' with enabled, or userId with action 'admit' | 'deny'",
+      },
       { status: 400 }
     );
   }
@@ -71,6 +87,31 @@ export async function POST(req: Request) {
   }
 
   const pool = getPool();
+
+  /**
+   * Turn the waiting room on or off.
+   *
+   * Without this a large meeting is impossible in practice: everyone joining by
+   * link has to be admitted one at a time, which is fine for five people and
+   * absurd for a hundred. Host-only, and off does not mean open to strangers —
+   * the meeting id is still a credential and only signed-in users get a token.
+   */
+  if (isSetLobby) {
+    await pool.query<ResultSetHeader>(
+      "UPDATE meetings SET lobby_enabled = :on WHERE id = :mid",
+      { on: body.enabled ? 1 : 0, mid: m.meetingId }
+    );
+    // Anyone already queued should go straight in rather than stay stuck.
+    if (!body.enabled) {
+      await pool.query<ResultSetHeader>(
+        `UPDATE lobby_admissions SET status = 'admitted'
+          WHERE meeting_id = :mid AND status = 'waiting'`,
+        { mid: m.meetingId }
+      );
+    }
+    return NextResponse.json({ ok: true, lobbyEnabled: !!body.enabled });
+  }
+
   await pool.query<ResultSetHeader>(
     `UPDATE lobby_admissions SET status = :status
       WHERE meeting_id = :mid AND user_id = :userId`,
