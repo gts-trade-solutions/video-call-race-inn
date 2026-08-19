@@ -32,7 +32,8 @@ const BUILT_IN = [
 ];
 
 const CUSTOM_KEY = "vc-custom-backgrounds";
-const MAX_CUSTOM = 6;
+/** Now that only a short path is stored, keeping more costs nothing. */
+const MAX_CUSTOM = 12;
 
 function loadCustom(): string[] {
   try {
@@ -46,25 +47,64 @@ function loadCustom(): string[] {
   }
 }
 
-/** Downscale an upload to ≤1280px JPEG so a few fit within localStorage. */
-async function fileToDataUrl(file: File): Promise<string> {
+/**
+ * Largest edge we keep. LiveKit scales the background to the video frame, so an
+ * image smaller than the frame gets *upscaled* — which is what made uploaded
+ * backgrounds look soft. 1920 covers the 1080p capture with nothing to spare
+ * and nothing wasted.
+ */
+const MAX_EDGE = 1920;
+const JPEG_QUALITY = 0.92;
+
+/**
+ * Prepares an upload and stores it on the server.
+ *
+ * These used to be shrunk to 1280px and kept in localStorage as data URLs,
+ * which was the wrong trade in both directions: 1280 is below the video frame
+ * so every background was upscaled and soft, and a handful of data URLs is
+ * enough to fill the storage quota. Uploading instead means the picture arrives
+ * at full size, the browser stores a short path rather than megabytes of
+ * base64, and the background follows the person to their other devices.
+ */
+async function uploadBackground(file: File): Promise<string> {
   const url = URL.createObjectURL(file);
+  let blob: Blob;
   try {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
       const i = new Image();
       i.onload = () => resolve(i);
-      i.onerror = reject;
+      i.onerror = () => reject(new Error("unreadable image"));
       i.src = url;
     });
-    const scale = Math.min(1, 1280 / Math.max(img.width, img.height));
+    // Only ever shrink. Enlarging a small photo here would add bytes without
+    // adding detail, and LiveKit will scale it to the frame anyway.
+    const scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(img.width * scale));
     canvas.height = Math.max(1, Math.round(img.height * scale));
-    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.85);
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    blob = await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error("encode failed"))),
+        "image/jpeg",
+        JPEG_QUALITY
+      )
+    );
   } finally {
     URL.revokeObjectURL(url);
   }
+
+  const res = await fetch(
+    `/api/upload?name=background.jpg&type=${encodeURIComponent("image/jpeg")}`,
+    { method: "POST", body: blob }
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.url) {
+    throw new Error(data.error || "upload failed");
+  }
+  return data.url as string;
 }
 
 export default function EffectsPanel({
@@ -78,6 +118,7 @@ export default function EffectsPanel({
   const brightness = useCameraBrightness();
   const [custom, setCustom] = useState<string[]>([]);
   const [missing, setMissing] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setCustom(loadCustom()), []);
@@ -92,18 +133,25 @@ export default function EffectsPanel({
 
   const addCustom = useCallback(
     async (file: File) => {
+      setUploading(true);
       try {
-        const dataUrl = await fileToDataUrl(file);
-        const next = [dataUrl, ...custom].slice(0, MAX_CUSTOM);
+        const src = await uploadBackground(file);
+        const next = [src, ...custom].slice(0, MAX_CUSTOM);
         setCustom(next);
         try {
           localStorage.setItem(CUSTOM_KEY, JSON.stringify(next));
         } catch {
-          onNotice("Couldn't save the image for next time (storage is full).");
+          onNotice("Couldn't remember that image for next time.");
         }
-        choose({ mode: "image", src: dataUrl });
-      } catch {
-        onNotice("Couldn't read that image.");
+        choose({ mode: "image", src });
+      } catch (err) {
+        onNotice(
+          err instanceof Error && err.message === "unreadable image"
+            ? "That file isn't an image this browser can read."
+            : "Couldn't upload that image."
+        );
+      } finally {
+        setUploading(false);
       }
     },
     [custom, onNotice, choose]
@@ -160,15 +208,13 @@ export default function EffectsPanel({
           </p>
         ) : (
           <>
-            <p className="text-[11px] text-gray-400 mb-2">
-              Tap to apply — everyone sees the change straight away.
-            </p>
-
-            <div className="grid grid-cols-3 gap-2 mb-2">
+            {/* No effect and blur are the two everyone reaches for, so they
+                sit on their own row rather than being lost among the images. */}
+            <div className="grid grid-cols-2 gap-2">
               <EffectTile
                 selected={selKey === "none"}
                 onClick={() => choose({ mode: "none" })}
-                label="None"
+                label="No effect"
               >
                 <NoneIcon />
               </EffectTile>
@@ -179,30 +225,39 @@ export default function EffectsPanel({
               >
                 <BlurGlyph />
               </EffectTile>
-              <EffectTile
-                selected={false}
-                onClick={() => fileRef.current?.click()}
-                label="Add new"
-              >
-                <UploadIcon />
-              </EffectTile>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="absolute w-px h-px opacity-0 pointer-events-none -z-10"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) addCustom(f);
-                  e.target.value = "";
-                }}
-              />
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
+            <div className="flex items-center justify-between mt-4 mb-2">
+              <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wide">
+                Backgrounds
+              </h4>
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-white bg-white/10 hover:bg-white/20 disabled:opacity-60 rounded-md px-2.5 py-1.5"
+              >
+                <UploadIcon />
+                {uploading ? "Uploading…" : "Add image"}
+              </button>
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="absolute w-px h-px opacity-0 pointer-events-none -z-10"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) addCustom(f);
+                e.target.value = "";
+              }}
+            />
+
+            {/* Two columns, not three: in a panel this narrow three tiles are
+                too small to tell one room from another at a glance. */}
+            <div className="grid grid-cols-2 gap-2">
               {custom.map((src) => (
                 <ImageTile
-                  key={src.slice(-24)}
+                  key={src}
                   src={src}
                   label="Your background"
                   selected={selKey === `image:${src}`}
@@ -224,20 +279,20 @@ export default function EffectsPanel({
               ))}
             </div>
 
-            {/* The picker crops each thumbnail exactly the way the video will,
-                so the tile is an honest preview. Worth saying anyway, because a
-                phone photo loses most of its height and that surprises people
-                if they haven't been told. */}
-            <p className="text-xs text-gray-400 mt-3 leading-snug">
-              {bundled.length === 0 && custom.length === 0 ? (
-                <>
-                  No backgrounds yet — tap <b>Add new</b> to use a photo from
-                  this device.{" "}
-                </>
-              ) : null}
-              A background fills the whole frame, so wide photos work best; tall
-              ones are cropped to their middle. Each tile shows the crop you&apos;ll
-              get.
+            {bundled.length === 0 && custom.length === 0 && (
+              <p className="text-xs text-gray-400 leading-snug">
+                No backgrounds yet — use <b>Add image</b> to pick a photo from
+                this device.
+              </p>
+            )}
+
+            {/* Each tile crops exactly the way the video will, so the tile is an
+                honest preview — but a phone photo loses most of its height and
+                that surprises people who haven't been told. */}
+            <p className="text-[11px] text-gray-400 mt-3 leading-snug">
+              Applied straight away, and everyone sees it. A background fills the
+              whole frame, so wide photos work best — tall ones are cropped to
+              their middle, exactly as each tile shows.
             </p>
           </>
         )}
