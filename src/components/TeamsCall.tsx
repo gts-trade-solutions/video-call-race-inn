@@ -1232,21 +1232,14 @@ export default function TeamsCall({
               onClick={toggleMyHand}
               aria-label={hands.myHandUp ? "Lower hand" : "Raise hand"}
               title={hands.myHandUp ? "Lower your hand" : "Raise your hand"}
-              className={handBtn(hands.myHandUp) + " relative"}
+              className={ctrlBtn(hands.myHandUp) + " relative"}
             >
               <HandIcon raised={hands.myHandUp} />
               <span className="ctrl-label">
                 {hands.myHandUp ? "Lower hand" : "Raise hand"}
               </span>
               {handCount > 0 && (
-                <span
-                  // Amber on amber would vanish once the button lights up.
-                  className={`absolute -top-1 -right-1 text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center ${
-                    hands.myHandUp
-                      ? "bg-teams-stage text-white"
-                      : "bg-amber-400 text-black"
-                  }`}
-                >
+                <span className="absolute -top-1 -right-1 text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-white text-black">
                   {handCount > 9 ? "9+" : handCount}
                 </span>
               )}
@@ -1408,12 +1401,7 @@ function ControlRail({
       <button
         onClick={onToggleHand}
         aria-label={myHandUp ? "Lower hand" : "Raise hand"}
-        // Amber when raised, matching the portrait control bar.
-        className={
-          myHandUp
-            ? "w-11 h-11 rounded-full flex items-center justify-center transition bg-amber-400 text-black"
-            : railBtn(false)
-        }
+        className={railBtn(myHandUp)}
       >
         <HandIcon raised={myHandUp} />
       </button>
@@ -3052,19 +3040,6 @@ function ctrlBtn(active: boolean) {
   ].join(" ");
 }
 
-/**
- * The raise-hand button. A raised hand is amber rather than the accent colour,
- * the way Teams does it: it's the one control whose state other people are
- * waiting on, so it should read across the room and not blend into the rail.
- */
-function handBtn(raised: boolean) {
-  return [
-    CTRL_SHAPE,
-    raised
-      ? "bg-amber-400 text-black hover:bg-amber-300"
-      : "bg-white/5 text-gray-200 hover:bg-white/15",
-  ].join(" ");
-}
 
 const I = (p: React.SVGProps<SVGSVGElement>) => ({
   width: 20,
