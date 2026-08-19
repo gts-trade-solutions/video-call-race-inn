@@ -192,19 +192,32 @@ export default function TeamsCall({
   const cameraTiles = useMemo(
     () =>
       isWebinar
-        ? allCameraTiles.filter(
-            (t) =>
+        ? allCameraTiles.filter((t) => {
+            // Spotlighting an attendee has to show *something*, so a spotlight
+            // always earns a tile. Without this a webinar filters them out for
+            // not publishing, and the host spotlights someone to no effect.
+            // They appear with their avatar until they're given the mic.
+            if (spotlightsRef.current.includes(t.participant.identity)) {
+              return true;
+            }
+            // My own tile only earns space if I can actually appear in it. An
+            // attendee in a webinar has no camera and no way to turn one on, so
+            // their own empty avatar was taking half the stage away from the
+            // person they came to watch.
+            if (t.participant.isLocal) return roles.canPublish;
+            return (
               !!t.publication ||
-              t.participant.isLocal ||
-              roles.publisherIdentities.includes(t.participant.identity) ||
-              // Spotlighting an attendee has to show *something*. Without this
-              // a webinar filters them out for not publishing, so the host
-              // spotlights someone and only their own tile ever highlights.
-              // They appear with their avatar until they're given the mic.
-              spotlightsRef.current.includes(t.participant.identity)
-          )
+              roles.publisherIdentities.includes(t.participant.identity)
+            );
+          })
         : allCameraTiles,
-    [isWebinar, allCameraTiles, roles.publisherIdentities, spotlights]
+    [
+      isWebinar,
+      allCameraTiles,
+      roles.publisherIdentities,
+      roles.canPublish,
+      spotlights,
+    ]
   );
 
   const nameOf = useCallback(
@@ -973,7 +986,23 @@ export default function TeamsCall({
                 : undefined
             }
           >
-            {isSharing ? (
+            {!isSharing && cameraTiles.length === 0 ? (
+              // A webinar attendee no longer gets a tile of their own, so
+              // before the presenter arrives there is genuinely nothing to
+              // draw. Say what we're waiting for instead of showing a void.
+              <div className="h-full w-full flex flex-col items-center justify-center text-center px-6">
+                <span className="text-gray-300 font-medium">
+                  {isWebinar
+                    ? "Waiting for the presenter"
+                    : "Waiting for others to join"}
+                </span>
+                <span className="text-sm text-gray-500 mt-1">
+                  {isWebinar
+                    ? "Their video and audio will appear here."
+                    : "Share the link to invite someone."}
+                </span>
+              </div>
+            ) : isSharing ? (
               <ShareLayout
                 screenShares={screenShares}
                 cameraTiles={cameraTiles}
