@@ -491,7 +491,7 @@ function RecordingStatus({ status }: { status: Recording["status"] }) {
     },
     completing: {
       label: "Processing…",
-      cls: "text-amber-600 bg-amber-50 border-amber-200",
+      cls: "text-teams-gray bg-teams-bg border-teams-line",
     },
     completed: {
       label: "Ready",

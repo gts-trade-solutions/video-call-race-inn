@@ -124,7 +124,7 @@ export default function ForgotPage() {
               <p className="text-sm text-teams-gray mt-2">{info}</p>
             )}
             {devPin && (
-              <div className="mt-3 text-sm bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-amber-800">
+              <div className="mt-3 text-sm bg-teams-bg border border-teams-line rounded-md px-3 py-2 text-teams-dark">
                 Dev mode (no email configured): your code is{" "}
                 <strong className="tracking-widest">{devPin}</strong>
               </div>

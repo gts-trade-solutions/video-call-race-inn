@@ -953,7 +953,7 @@ export default function TeamsCall({
             {net.limited && (
               <span
                 title="Your connection is struggling, so video quality was reduced to stop it stalling. It goes back up on its own."
-                className="flex items-center gap-1.5 text-xs font-medium text-amber-200 bg-amber-500/15 border border-amber-500/40 rounded-md px-2 py-1"
+                className="flex items-center gap-1.5 text-xs font-medium text-gray-200 bg-white/10 border border-white/25 rounded-md px-2 py-1"
               >
                 <SignalIcon />
                 <span className="hidden sm:inline">Weak connection</span>
@@ -1286,7 +1286,7 @@ export default function TeamsCall({
                 <CaptionsIcon />
                 <span className="ctrl-label">Notes</span>
                 {captions.on && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-teams-stage" />
+                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-white ring-2 ring-teams-stage" />
                 )}
               </button>
             )}
@@ -2203,7 +2203,7 @@ function Tile({
       {raisedAt > 0 && (
         <span
           title={`${name} raised their hand`}
-          className={`absolute top-2 z-10 flex items-center gap-1 bg-amber-400 text-black text-xs font-semibold rounded-md px-1.5 py-1 hand-bounce ${
+          className={`absolute top-2 z-10 flex items-center gap-1 bg-black/70 text-white text-xs font-semibold rounded-md px-1.5 py-1 hand-bounce ${
             // The mute badge owns the top-left corner on flush tiles.
             flush ? "right-2" : "left-2"
           }`}
@@ -2463,7 +2463,7 @@ function PeoplePanel({
             {hands.order.length > 0 && (
               <button
                 onClick={hands.lowerAllHands}
-                className="text-xs font-medium text-amber-300 hover:underline"
+                className="text-xs font-medium text-white hover:underline"
               >
                 Lower all
               </button>
@@ -2569,7 +2569,7 @@ function PeoplePanel({
                 </div>
               </div>
               {handPlace >= 0 && (
-                <span className="flex items-center gap-1 bg-amber-400 text-black text-[11px] font-semibold rounded-md px-1.5 py-0.5">
+                <span className="flex items-center gap-1 bg-white/15 text-white text-[11px] font-semibold rounded-md px-1.5 py-0.5">
                   <HandIcon raised small />
                   {handPlace + 1}
                 </span>
@@ -2578,7 +2578,7 @@ function PeoplePanel({
                 {!p.isMicrophoneEnabled ? (
                   <MicOffMini />
                 ) : p.isSpeaking ? (
-                  <span className="text-amber-300">
+                  <span className="text-white">
                     <SpeakingBars />
                   </span>
                 ) : (
@@ -2762,7 +2762,7 @@ function LatencyPill({
       : rttMs < 150
       ? "text-emerald-200 bg-emerald-500/15 border-emerald-500/40"
       : rttMs < 300
-      ? "text-amber-200 bg-amber-500/15 border-amber-500/40"
+      ? "text-gray-200 bg-white/10 border-white/25"
       : "text-red-200 bg-red-500/15 border-red-500/40";
 
   const line = (s: StreamStats | null) =>
@@ -2862,7 +2862,7 @@ function LobbyBanner({
     <div className="fixed top-16 right-3 sm:right-4 z-40 w-80 max-w-[92vw] bg-teams-stage border border-white/15 rounded-xl shadow-2xl overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2.5 bg-teams-purple/20 border-b border-white/10">
         <span className="text-sm font-semibold flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+          <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
           {waiting.length} waiting to join
         </span>
         {waiting.length > 1 && (

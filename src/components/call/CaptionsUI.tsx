@@ -270,7 +270,7 @@ function SummaryView({
           <ul className="space-y-1.5">
             {summary.actionItems.map((a, i) => (
               <li key={i} className="text-sm">
-                <span className="font-semibold text-amber-300">{a.owner}</span>
+                <span className="font-semibold text-white">{a.owner}</span>
                 {a.due && (
                   <span className="ml-1.5 text-[11px] bg-white/10 rounded px-1.5 py-0.5">
                     {a.due}
