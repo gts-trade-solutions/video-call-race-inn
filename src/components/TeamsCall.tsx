@@ -2530,8 +2530,18 @@ function PeoplePanel({
             roles.mode === "webinar" &&
             !isOwnerRow &&
             !isCoHostRow;
+          // Spotlighting is not moderation — a host putting themselves on the
+          // main stage is an ordinary thing to want, and a presenter usually
+          // *is* the person to spotlight. So it is allowed on any row,
+          // including the host's own, which otherwise has no menu at all
+          // because every other action there is something you do *to* someone.
+          const canSpotlight = roles.canManage;
           const showMenu =
-            canActOn || canLowerHand || canGiveControl || canGrantSpeak;
+            canActOn ||
+            canLowerHand ||
+            canGiveControl ||
+            canGrantSpeak ||
+            canSpotlight;
 
           return (
             <div
@@ -2619,10 +2629,16 @@ function PeoplePanel({
                         }}
                       >
                         {spotlights.includes(p.identity)
-                          ? "Remove from spotlight"
+                          ? p.isLocal
+                            ? "Stop spotlighting me"
+                            : "Remove from spotlight"
                           : spotlights.length > 0
-                            ? "Add to spotlight"
-                            : "Spotlight for everyone"}
+                            ? p.isLocal
+                              ? "Add me to spotlight"
+                              : "Add to spotlight"
+                            : p.isLocal
+                              ? "Spotlight me for everyone"
+                              : "Spotlight for everyone"}
                       </MenuItem>
                     )}
                     {canGiveControl &&
