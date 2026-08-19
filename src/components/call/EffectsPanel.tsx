@@ -48,13 +48,58 @@ function loadCustom(): string[] {
 }
 
 /**
- * Largest edge we keep. LiveKit scales the background to the video frame, so an
- * image smaller than the frame gets *upscaled* — which is what made uploaded
- * backgrounds look soft. 1920 covers the 1080p capture with nothing to spare
- * and nothing wasted.
+ * Backgrounds are prepared as 16:9 at this size before they're uploaded.
+ *
+ * LiveKit scales whatever it's given to *cover* the video frame, so an image of
+ * a different shape is cropped to fill — and the tile then crops that again to
+ * its own shape. Those two crops multiply: a square logo survived as about a
+ * third of itself, magnified, which is why an uploaded logo appeared as a
+ * fragment rather than a background.
+ *
+ * Fitting to the frame's own shape here makes LiveKit's crop a no-op, so what
+ * ends up in the file is what appears behind you — and what the picker tile
+ * shows.
  */
-const MAX_EDGE = 1920;
+const FRAME_W = 1920;
+const FRAME_H = 1080;
 const JPEG_QUALITY = 0.92;
+/** Beyond this difference in shape, filling would cut too much away. */
+const ASPECT_TOLERANCE = 0.15;
+
+/**
+ * The image's own edge colour, for filling the space around a picture that
+ * doesn't share the frame's shape.
+ *
+ * Sampled rather than assumed: a logo on black gets black and the join is
+ * invisible, where a fixed grey or a blurred enlargement would both announce
+ * themselves. Averaging the border ring of a tiny copy is enough — this only
+ * needs to be close, and it costs one 24x24 draw.
+ */
+function edgeColour(img: HTMLImageElement): string {
+  try {
+    const n = 24;
+    const c = document.createElement("canvas");
+    c.width = n;
+    c.height = n;
+    const ctx = c.getContext("2d", { willReadFrequently: true })!;
+    ctx.drawImage(img, 0, 0, n, n);
+    const { data } = ctx.getImageData(0, 0, n, n);
+    let r = 0, g = 0, b = 0, count = 0;
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        if (x > 0 && x < n - 1 && y > 0 && y < n - 1) continue; // border only
+        const i = (y * n + x) * 4;
+        r += data[i];
+        g += data[i + 1];
+        b += data[i + 2];
+        count++;
+      }
+    }
+    return `rgb(${Math.round(r / count)},${Math.round(g / count)},${Math.round(b / count)})`;
+  } catch {
+    return "#000";
+  }
+}
 
 /**
  * Prepares an upload and stores it on the server.
@@ -76,18 +121,38 @@ async function uploadBackground(file: File): Promise<string> {
       i.onerror = () => reject(new Error("unreadable image"));
       i.src = url;
     });
-    // Only ever shrink. Enlarging a small photo here would add bytes without
-    // adding detail, and LiveKit will scale it to the frame anyway.
-    const scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height));
+
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(img.width * scale));
-    canvas.height = Math.max(1, Math.round(img.height * scale));
+    canvas.width = FRAME_W;
+    canvas.height = FRAME_H;
     const ctx = canvas.getContext("2d")!;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    const imgAspect = img.width / img.height;
+    const frameAspect = FRAME_W / FRAME_H;
+    // Symmetric, so a too-wide and a too-tall image are judged the same way.
+    const mismatch = Math.abs(Math.log(imgAspect / frameAspect));
+
+    if (mismatch < ASPECT_TOLERANCE) {
+      // Near enough the frame's shape: fill it, losing only slivers.
+      const s = Math.max(FRAME_W / img.width, FRAME_H / img.height);
+      const w = img.width * s;
+      const h = img.height * s;
+      ctx.drawImage(img, (FRAME_W - w) / 2, (FRAME_H - h) / 2, w, h);
+    } else {
+      // A different shape entirely — a logo, a square, a phone photo. Show all
+      // of it on its own edge colour rather than magnifying a fragment.
+      ctx.fillStyle = edgeColour(img);
+      ctx.fillRect(0, 0, FRAME_W, FRAME_H);
+      const s = Math.min(FRAME_W / img.width, FRAME_H / img.height);
+      const w = img.width * s;
+      const h = img.height * s;
+      ctx.drawImage(img, (FRAME_W - w) / 2, (FRAME_H - h) / 2, w, h);
+    }
+
     blob = await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error("encode failed"))),
+        (bb) => (bb ? resolve(bb) : reject(new Error("encode failed"))),
         "image/jpeg",
         JPEG_QUALITY
       )
@@ -290,9 +355,10 @@ export default function EffectsPanel({
                 honest preview — but a phone photo loses most of its height and
                 that surprises people who haven't been told. */}
             <p className="text-[11px] text-gray-400 mt-3 leading-snug">
-              Applied straight away, and everyone sees it. A background fills the
-              whole frame, so wide photos work best — tall ones are cropped to
-              their middle, exactly as each tile shows.
+              Applied straight away, and everyone sees it. Any shape works —
+              a photo the shape of the video fills it, and anything else (a logo,
+              a square, a phone photo) is shown whole on its own colour rather
+              than being cropped.
             </p>
           </>
         )}
