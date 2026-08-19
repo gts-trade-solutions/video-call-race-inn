@@ -27,7 +27,20 @@ export function getPool(): mysql.Pool {
       password: cfg.password,
       database: cfg.database,
       waitForConnections: true,
-      connectionLimit: 10,
+      /**
+       * mysql2 defaults this to 10, which is the ceiling on how many queries
+       * can be in flight at once. Every participant in a meeting polls for
+       * raised hands, roles and recording state, so in a room of a hundred the
+       * pool is the narrowest part of the whole request path — requests sit
+       * waiting for a connection while the database itself is idle.
+       *
+       * 30 is comfortable for one instance and still far below MySQL's usual
+       * max_connections of 151, leaving room for a second app instance and for
+       * a person with a mysql shell open. Raise DB_CONNECTION_LIMIT if the
+       * server grows; check the database's own max_connections before going far
+       * above this, since exhausting it locks everyone out, not just the app.
+       */
+      connectionLimit: Number(process.env.DB_CONNECTION_LIMIT) || 30,
       queueLimit: 0,
       namedPlaceholders: true,
       // Parse/serialize all DATETIME/TIMESTAMP values as UTC so scheduled

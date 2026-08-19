@@ -75,6 +75,12 @@ const AUTO_LOWER_MS = 1500;
  */
 const ALONE_GRACE_MS = 4000;
 
+/**
+ * How many people can be spotlighted at once. Teams allows seven and that is
+ * about the point where each tile stops being worth looking at anyway.
+ */
+const MAX_SPOTLIGHT = 7;
+
 type Panel = "none" | "chat" | "people" | "effects" | "notes";
 type WaitingPerson = {
   userId: number;
@@ -172,6 +178,17 @@ export default function TeamsCall({
   const isWebinar = roles.mode === "webinar";
   const iCanPublish = roles.canPublish;
 
+  /**
+   * Who the room is spotlighted on. Declared here rather than with the rest of
+   * the spotlight logic below because cameraTiles needs it: in a webinar a
+   * spotlighted attendee only gets a tile because of this.
+   */
+  const [spotlights, setSpotlights] = useState<string[]>([]);
+  // Mirror for the data-channel handler, which needs the previous list
+  // synchronously to work out what actually changed.
+  const spotlightsRef = useRef<string[]>([]);
+  spotlightsRef.current = spotlights;
+
   const cameraTiles = useMemo(
     () =>
       isWebinar
@@ -179,10 +196,15 @@ export default function TeamsCall({
             (t) =>
               !!t.publication ||
               t.participant.isLocal ||
-              roles.publisherIdentities.includes(t.participant.identity)
+              roles.publisherIdentities.includes(t.participant.identity) ||
+              // Spotlighting an attendee has to show *something*. Without this
+              // a webinar filters them out for not publishing, so the host
+              // spotlights someone and only their own tile ever highlights.
+              // They appear with their avatar until they're given the mic.
+              spotlightsRef.current.includes(t.participant.identity)
           )
         : allCameraTiles,
-    [isWebinar, allCameraTiles, roles.publisherIdentities]
+    [isWebinar, allCameraTiles, roles.publisherIdentities, spotlights]
   );
 
   const nameOf = useCallback(
@@ -606,8 +628,27 @@ export default function TeamsCall({
     setPinned((cur) => (cur === identity ? null : identity));
   }, []);
 
-  /** Set by a host or co-host; changes the view for everybody. */
-  const [spotlight, setSpotlight] = useState<string | null>(null);
+  /**
+   * Set by a host or co-host; changes the view for everybody.
+   *
+   * A list, not one person: Teams lets an organiser spotlight several people at
+   * once — a panel, or a presenter alongside an interpreter — and with only one
+   * slot the second choice silently replaced the first.
+   */
+  /** Parses the wire form, which is a JSON array of identities. */
+  const readSpotlights = (payload: Uint8Array): string[] => {
+    const text = new TextDecoder().decode(payload);
+    if (!text) return [];
+    try {
+      const v = JSON.parse(text);
+      return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+    } catch {
+      // Older clients sent a bare identity. Accept it so a mixed-version room
+      // during a rollout still agrees on what is spotlighted.
+      return [text];
+    }
+  };
+
   const { send: sendSpotlight } = useDataChannel("spotlight", (msg) => {
     // A spotlight from someone who isn't running the meeting is ignored, so a
     // participant can't reach in and rearrange everyone else's screen.
@@ -619,26 +660,40 @@ export default function TeamsCall({
     ) {
       return;
     }
-    const v = new TextDecoder().decode(msg.payload);
-    setSpotlight(v || null);
-    // Say so, rather than silently rearranging someone's screen. Only for
-    // other people's spotlights — I already know about my own.
+    const next = readSpotlights(msg.payload);
+    const prev = spotlightsRef.current;
+    setSpotlights(next);
+
+    // Say so, rather than silently rearranging someone's screen — and name only
+    // what actually changed, so adding a fourth person doesn't re-announce the
+    // other three.
     if (from && from !== localParticipant.identity) {
-      const who = participants.find((x) => x.identity === v);
-      notify(
-        v
-          ? `${who?.name || who?.identity || "Someone"} was spotlighted for everyone`
-          : "Spotlight ended"
-      );
+      const added = next.filter((id) => !prev.includes(id));
+      const nameFor = (id: string) => {
+        const who = participants.find((x) => x.identity === id);
+        return who?.name || who?.identity || "Someone";
+      };
+      if (added.length === 1) {
+        notify(`${nameFor(added[0])} was spotlighted for everyone`);
+      } else if (added.length > 1) {
+        notify(`${added.length} people were spotlighted for everyone`);
+      } else if (next.length === 0 && prev.length > 0) {
+        notify("Spotlight ended");
+      }
     }
   });
+
   const toggleSpotlight = useCallback(
     (identity: string) => {
       if (!canManage) return;
-      setSpotlight((cur) => {
-        const next = cur === identity ? null : identity;
+      setSpotlights((cur) => {
+        const next = cur.includes(identity)
+          ? cur.filter((id) => id !== identity)
+          : // Oldest goes when the list is full, so the newest choice always
+            // takes effect rather than being silently refused.
+            [...cur, identity].slice(-MAX_SPOTLIGHT);
         try {
-          sendSpotlight(new TextEncoder().encode(next ?? ""), RELIABLE);
+          sendSpotlight(new TextEncoder().encode(JSON.stringify(next)), RELIABLE);
         } catch {
           /* ignore */
         }
@@ -648,11 +703,24 @@ export default function TeamsCall({
     [canManage, sendSpotlight]
   );
 
+  const clearSpotlights = useCallback(() => {
+    if (!canManage) return;
+    setSpotlights([]);
+    try {
+      sendSpotlight(new TextEncoder().encode("[]"), RELIABLE);
+    } catch {
+      /* ignore */
+    }
+  }, [canManage, sendSpotlight]);
+
   /**
-   * Who I actually see big. My pin wins over the room spotlight: if I've
-   * deliberately chosen someone to watch, a spotlight shouldn't yank me away.
+   * Who I see big. My own pin wins over the room's spotlight: having chosen
+   * someone to watch, I shouldn't be yanked away. Otherwise a single spotlight
+   * gets the big-tile layout, and several share the stage as a grid.
    */
-  const focused = pinned ?? spotlight;
+  const focused = pinned ?? (spotlights.length === 1 ? spotlights[0] : null);
+  /** More than one spotlight: the stage shows exactly those people. */
+  const stageOnly = !pinned && spotlights.length > 1 ? spotlights : null;
 
   // ----- Waiting room: host sees who's knocking and admits/denies -----
   const [waiting, setWaiting] = useState<WaitingPerson[]>([]);
@@ -769,7 +837,20 @@ export default function TeamsCall({
     );
   }
 
-  // Focus-layout tiles for whoever is being shown big — my pin or the room
+  /**
+   * With more than one person spotlighted the stage becomes just them, as an
+   * equal grid — the same thing Teams does. Anyone who has since left drops out
+   * on their own, since they no longer have a tile.
+   */
+  const stageTiles = useMemo(
+    () =>
+      stageOnly
+        ? cameraTiles.filter((t) => stageOnly.includes(t.participant.identity))
+        : null,
+    [stageOnly, cameraTiles]
+  );
+
+  // Focus-layout tiles for whoever is being shown big — my pin or a single room
   // spotlight — provided that person is still in the meeting.
   const focusedTile = focused
     ? cameraTiles.find((t) => t.participant.identity === focused)
@@ -794,7 +875,8 @@ export default function TeamsCall({
         (t) => t.participant.identity !== focusedTile.participant.identity
       )
     : remoteTiles;
-  const mobileGridActive = isMobile && !isSharing && !focusedTile;
+  const mobileGridActive =
+    isMobile && !isSharing && !focusedTile && !stageTiles?.length;
 
   // On a phone the call chrome (header + control bar) hides on tap so the
   // video really is full-screen; tapping again brings it back.
@@ -898,6 +980,18 @@ export default function TeamsCall({
                 control={shareControl}
                 nameOf={nameOf}
               />
+            ) : stageTiles?.length ? (
+              // Several people spotlighted: they get the stage as equals, and
+              // nobody else is drawn. Works the same on a phone.
+              isMobile ? (
+                <MobileGrid tiles={stageTiles} onPin={togglePin} />
+              ) : (
+                <GridStage
+                  tiles={stageTiles}
+                  focusedIdentity={null}
+                  onPin={togglePin}
+                />
+              )
             ) : mobileGridActive ? (
               <MobileGrid tiles={cameraTiles} onPin={togglePin} />
             ) : isMobile && focusedTile ? (
@@ -968,8 +1062,9 @@ export default function TeamsCall({
                   roles={roles}
                   hands={hands}
                   control={shareControl}
-                  spotlight={spotlight}
+                  spotlights={spotlights}
                   onSpotlightAll={toggleSpotlight}
+                  onClearSpotlights={clearSpotlights}
                   lobbyEnabled={lobbyEnabled}
                   onSetLobby={setLobby}
                   onError={notify}
@@ -2269,8 +2364,9 @@ function PeoplePanel({
   roles,
   hands,
   control,
-  spotlight,
+  spotlights,
   onSpotlightAll,
+  onClearSpotlights,
   lobbyEnabled,
   onSetLobby,
   onError,
@@ -2280,10 +2376,12 @@ function PeoplePanel({
   roles: MeetingRoles;
   hands: UseRaiseHand;
   control: UseShareControl;
-  /** Who the room is currently spotlighted on, if anyone. */
-  spotlight: string | null;
-  /** Broadcast a spotlight to everyone. Host/co-host only. */
+  /** Everyone the room is currently spotlighted on. */
+  spotlights: string[];
+  /** Add or remove one person from the room's spotlight. Host/co-host only. */
   onSpotlightAll: (identity: string) => void;
+  /** Clear the whole spotlight. Host/co-host only. */
+  onClearSpotlights: () => void;
   /** Whether newcomers have to be admitted. */
   lobbyEnabled: boolean;
   onSetLobby: (enabled: boolean) => void;
@@ -2351,6 +2449,14 @@ function PeoplePanel({
                 className="text-xs font-medium text-amber-300 hover:underline"
               >
                 Lower all
+              </button>
+            )}
+            {spotlights.length > 0 && (
+              <button
+                onClick={onClearSpotlights}
+                className="text-xs font-medium text-white hover:underline"
+              >
+                Clear spotlight{spotlights.length > 1 ? `s (${spotlights.length})` : ""}
               </button>
             )}
             <button
@@ -2495,9 +2601,11 @@ function PeoplePanel({
                           setMenuFor(null);
                         }}
                       >
-                        {spotlight === p.identity
-                          ? "Stop spotlight"
-                          : "Spotlight for everyone"}
+                        {spotlights.includes(p.identity)
+                          ? "Remove from spotlight"
+                          : spotlights.length > 0
+                            ? "Add to spotlight"
+                            : "Spotlight for everyone"}
                       </MenuItem>
                     )}
                     {canGiveControl &&
