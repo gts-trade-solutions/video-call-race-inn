@@ -376,8 +376,14 @@ export default function MeetingRoom({
 
   if (phase === "prejoin") {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-[#1f1f1f] to-[#2d2c2c] flex flex-col items-center justify-center px-4">
-        <div className="mb-6 text-center">
+      // html and body are height:100%, so the page itself cannot scroll and
+      // anything past the fold is simply unreachable — which is how the Join
+      // button disappeared on a short window. A scroll container with a
+      // min-h-full child centres the card when it fits and scrolls when it
+      // doesn't, so the button is always reachable.
+      <div className="h-full overflow-y-auto bg-gradient-to-br from-[#1f1f1f] to-[#2d2c2c]">
+        <div className="min-h-full flex flex-col items-center justify-center px-4 py-8">
+        <div className="mb-5 text-center">
           <h1 className="text-white text-2xl font-semibold">Ready to join?</h1>
           <p className="text-gray-400 text-sm mt-1">
             Meeting ID: <span className="font-mono">{room}</span>
@@ -398,7 +404,7 @@ export default function MeetingRoom({
             {copied ? "Link copied!" : "Copy invite link"}
           </button>
         </div>
-        <div className="bg-white rounded-2xl overflow-hidden shadow-2xl w-full max-w-2xl">
+        <div className="bg-white rounded-2xl overflow-hidden shadow-2xl w-full max-w-lg">
           <PreJoin
             defaults={preJoinDefaults}
             onSubmit={handlePreJoinSubmit}
@@ -408,10 +414,11 @@ export default function MeetingRoom({
         </div>
         <button
           onClick={() => router.push("/dashboard")}
-          className="mt-6 text-gray-300 hover:text-white text-sm"
+          className="mt-5 text-gray-300 hover:text-white text-sm"
         >
           ← Back to dashboard
         </button>
+        </div>
       </div>
     );
   }

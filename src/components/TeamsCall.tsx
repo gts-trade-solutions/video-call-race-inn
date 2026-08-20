@@ -45,7 +45,6 @@ import { closeChimes, playHandChime } from "@/components/call/chime";
 import {
   useConnectionStats,
   type ConnectionStats,
-  type StreamStats,
 } from "@/components/call/useConnectionStats";
 import {
   useShareControl,
@@ -2810,24 +2809,26 @@ function RoleTag({ label }: { label: string }) {
  * arbitrary scale: under ~150ms nobody notices, by ~300ms people start talking
  * over each other, and beyond that it's a walkie-talkie.
  */
+/**
+ * Latency in the call header.
+ *
+ * Just the number. It used to open a panel of loss, resolution and bitrate,
+ * which was useful while diagnosing but is clutter to sit and look at for an
+ * hour — and several of its rows read as a dash whenever there was nothing to
+ * report, which looks broken rather than idle.
+ *
+ * The colour carries the meaning instead: under 150ms nobody notices, by 300ms
+ * people start talking over each other, beyond that it is a walkie-talkie.
+ */
 function LatencyPill({
   stats,
   cap,
 }: {
   stats: ConnectionStats;
-  /** Set when the guard is holding quality down, so it is never a mystery. */
+  /** Set when the guard is holding quality down, so the tooltip can say so. */
   cap: string | null;
 }) {
-  const [open, setOpen] = useState(false);
   const { rttMs } = stats;
-
-  useEffect(() => {
-    if (!open) return;
-    const close = () => setOpen(false);
-    window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
-  }, [open]);
-
   const tone =
     rttMs === null
       ? "text-gray-300 bg-white/10 border-white/20"
@@ -2837,64 +2838,22 @@ function LatencyPill({
       ? "text-gray-200 bg-white/10 border-white/25"
       : "text-red-200 bg-red-500/15 border-red-500/40";
 
-  const line = (s: StreamStats | null) =>
-    !s
-      ? "—"
-      : [
-          s.width && s.height ? `${s.width}×${s.height}` : null,
-          s.fps != null ? `${s.fps} fps` : null,
-          s.kbps != null ? `${s.kbps} kbps` : null,
-        ]
-          .filter(Boolean)
-          .join(" · ") || "—";
-
   return (
-    <span className="relative">
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((o) => !o);
-        }}
-        title="Connection latency. Tap for details."
-        className={`flex items-center gap-1.5 text-xs font-medium border rounded-md px-2 py-1 tabular-nums ${tone}`}
-      >
-        <SignalIcon />
-        {rttMs === null ? "—" : `${rttMs} ms`}
-      </button>
-
-      {open && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="absolute right-0 top-full mt-1 z-40 w-64 bg-teams-stage border border-white/15 rounded-lg shadow-2xl p-3 text-xs text-gray-200 space-y-1.5 text-left font-normal"
-        >
-          <Row k="Latency (round trip)" v={rttMs === null ? "—" : `${rttMs} ms`} />
-          <Row
-            k="Packet loss"
-            v={stats.lossPct === null ? "—" : `${stats.lossPct}%`}
-          />
-          <div className="pt-1.5 border-t border-white/10" />
-          <Row k="You're sending" v={line(stats.send)} />
-          <Row k="Receiving" v={line(stats.recv)} />
-          {/* If quality is being held down, say so here — a cap nobody can see
-              is indistinguishable from the app simply being bad. */}
-          {cap && <Row k="Limited to" v={`${cap} (weak connection)`} />}
-          <p className="text-[11px] text-gray-400 pt-1 leading-snug">
-            Latency is to the media server, not to the other person.
-          </p>
-        </div>
-      )}
+    <span
+      title={
+        (rttMs === null
+          ? "Measuring your connection."
+          : `Round trip to the media server: ${rttMs} ms.`) +
+        (cap ? ` Video is limited to ${cap}.` : "")
+      }
+      className={`flex items-center gap-1.5 text-xs font-medium border rounded-md px-2 py-1 tabular-nums ${tone}`}
+    >
+      <SignalIcon />
+      {rttMs === null ? "—" : `${rttMs} ms`}
     </span>
   );
 }
 
-function Row({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <span className="text-gray-400 shrink-0">{k}</span>
-      <span className="tabular-nums text-right">{v}</span>
-    </div>
-  );
-}
 
 function MenuItem({
   children,
