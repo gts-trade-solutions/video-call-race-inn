@@ -76,10 +76,15 @@ const AUTO_LOWER_MS = 1500;
 const ALONE_GRACE_MS = 4000;
 
 /**
- * How many people can be spotlighted at once. Teams allows seven and that is
- * about the point where each tile stops being worth looking at anyway.
+ * How many people can be spotlighted at once.
+ *
+ * This was seven, copying Teams, and a host with eleven people in the room hit
+ * it and reasonably asked why. There is no technical reason for a low number —
+ * the cap only exists so the stage can't be filled with tiles too small to read.
+ * Sixteen is a 4x4 grid, which is about where a face stops being recognisable,
+ * and past that spotlighting everyone is the same as spotlighting nobody.
  */
-const MAX_SPOTLIGHT = 7;
+const MAX_SPOTLIGHT = 16;
 
 type Panel = "none" | "chat" | "people" | "effects" | "notes";
 type WaitingPerson = {
@@ -2333,7 +2338,7 @@ function ChatPanel({
 
   return (
     <PanelShell title="Chat" onClose={onClose}>
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-3">
         {messages.length === 0 && (
           <p className="text-sm text-gray-400 text-center mt-6">
             No messages yet. Say hello 👋
@@ -2468,7 +2473,7 @@ function PeoplePanel({
       onClose={onClose}
       actions={
         roles.canManage ? (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
             {hands.order.length > 0 && (
               <button
                 onClick={hands.lowerAllHands}
@@ -2507,7 +2512,7 @@ function PeoplePanel({
         ) : null
       }
     >
-      <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
+      <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-1">
         {/* A webinar has two clear groups, so label them and give the audience
             a headcount rather than a list nobody scrolls through. */}
         {roles.mode === "webinar" && (
@@ -2921,7 +2926,10 @@ function PanelShell({
 }) {
   return (
     <div className="flex flex-col h-full">
-      <div className="h-14 shrink-0 flex items-center justify-between gap-2 px-4 border-b border-white/10">
+      {/* min-h rather than a fixed height: the host actions have grown to four
+          and they wrap on a narrow panel, so the header has to be allowed to
+          grow with them instead of spilling over the list below it. */}
+      <div className="min-h-14 shrink-0 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2 border-b border-white/10">
         <h2 className="font-semibold text-sm shrink-0">{title}</h2>
         {actions && <div className="ml-auto">{actions}</div>}
         <button
