@@ -44,7 +44,7 @@ export function BrandLogo({
   className,
   // No surface by default: the marks are transparent PNGs and sit straight on
   // the bar. A caller that needs one can still pass it.
-  plateClassName = "flex items-center min-w-0",
+  plateClassName = "flex items-center min-w-0 rounded-md overflow-hidden",
 }: {
   /** Filename without an extension, e.g. "logo-bluderma". */
   name: string;
@@ -53,10 +53,10 @@ export function BrandLogo({
   /** Optional surface behind the mark, for a bar it would disappear into. */
   plateClassName?: string;
 }) {
-  // .png first because that is what ships in public/ today: the marks are
-  // transparent PNGs. The others stay as a fallback so swapping the artwork
-  // later needs no code change, but the shipped format should never cost a 404.
-  const candidates = [`/${name}.png`, `/${name}.jpg`, `/${name}.svg`];
+  // .jpg first because that is what ships in public/ today. The others stay as
+  // a fallback so swapping the artwork later needs no code change, but the
+  // shipped format should never cost a 404 on the way to being found.
+  const candidates = [`/${name}.jpg`, `/${name}.png`, `/${name}.svg`];
   const [attempt, setAttempt] = useState(0);
   if (attempt >= candidates.length) return null;
   return (

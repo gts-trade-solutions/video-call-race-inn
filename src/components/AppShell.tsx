@@ -185,7 +185,8 @@ export default function AppShell({
       {/* Right side: header + content */}
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="h-12 sm:h-14 shrink-0 bg-teams-purple text-white flex items-center px-3 sm:px-4 justify-between shadow z-10">
-          {/* The marks are transparent PNGs and sit straight on the bar. */}
+          {/* These marks carry their own white background, so the container
+              rounds and clips it rather than leaving a hard rectangle. */}
           <BrandLogo
             name="logo-bluderma"
             alt="BluDerma"
@@ -196,7 +197,7 @@ export default function AppShell({
               name="logo-madenkorea"
               alt="Made N Korea"
               className="h-[30px] sm:h-10 w-auto object-contain"
-              plateClassName="hidden sm:flex items-center"
+              plateClassName="hidden sm:flex items-center rounded-md overflow-hidden"
             />
             <ThemeSwitcher />
             <span className="text-sm hidden sm:block opacity-90">
