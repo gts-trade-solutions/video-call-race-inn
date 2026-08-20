@@ -51,7 +51,10 @@ export function BrandLogo({
   /** The surface behind the mark. Both logos are dark art on a dark bar. */
   plateClassName?: string;
 }) {
-  const candidates = [`/${name}.png`, `/${name}.jpg`, `/${name}.svg`];
+  // .jpg first because that is what ships in public/ today. The others stay as
+  // a fallback so replacing the artwork with a PNG or an SVG later needs no
+  // code change — but the shipped format should not cost a 404 on every load.
+  const candidates = [`/${name}.jpg`, `/${name}.png`, `/${name}.svg`];
   const [attempt, setAttempt] = useState(0);
   if (attempt >= candidates.length) return null;
   return (
