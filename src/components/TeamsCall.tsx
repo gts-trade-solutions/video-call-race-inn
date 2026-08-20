@@ -160,9 +160,6 @@ export default function TeamsCall({
   // struggling connection means softer video instead of video that stalls.
   // Latency and the rest of the connection numbers, shown in the header.
   const connStats = useConnectionStats(true);
-  // Backs the received video off only when loss is measurably bad — see the
-  // hook for why it is deliberately reluctant.
-  const net = useNetworkGuard(connStats.lossPct);
   const roles = useMeetingRoles(room, {
     isHost,
     isOwner,
@@ -176,6 +173,10 @@ export default function TeamsCall({
   // In a webinar the audience doesn't get mic/camera/share controls at all —
   // the token doesn't permit publishing, so showing them would only mislead.
   const isWebinar = roles.mode === "webinar";
+
+  // Backs the received video off only when loss is measurably bad — see the
+  // hook for why it is deliberately reluctant.
+  const net = useNetworkGuard(connStats.lossPct, isWebinar);
   const iCanPublish = roles.canPublish;
 
   /**

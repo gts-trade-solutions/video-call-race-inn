@@ -48,7 +48,36 @@ const GOOD_LOSS_PCT = 2;
 const BAD_SAMPLES = 2;
 const GOOD_SAMPLES = 2;
 
-export function useNetworkGuard(lossPct: number | null): NetworkGuard {
+/**
+ * A standing ceiling on the video every attendee receives.
+ *
+ * Bandwidth in a webinar is the audience multiplied: one presenter to a hundred
+ * viewers is about 304 Mbps at 1080p but 84 at 540p and 49 at 360p, because
+ * each viewer is served their own copy. Over an hour that is 137 GB against 38
+ * or 22 — the difference between comfortably inside an allowance and well past
+ * it, for video nobody is examining closely.
+ *
+ * Unset means no ceiling, which is the behaviour without this. Set
+ * NEXT_PUBLIC_WEBINAR_VIDEO to "medium" (~360p) or "low" (~180p) when the
+ * bandwidth matters more than the detail; it only applies in a webinar, where
+ * the audience is watching rather than talking.
+ */
+function webinarCeiling(isWebinar: boolean): VideoQuality | null {
+  if (!isWebinar) return null;
+  switch ((process.env.NEXT_PUBLIC_WEBINAR_VIDEO || "").toLowerCase()) {
+    case "low":
+      return VideoQuality.LOW;
+    case "medium":
+      return VideoQuality.MEDIUM;
+    default:
+      return null;
+  }
+}
+
+export function useNetworkGuard(
+  lossPct: number | null,
+  isWebinar = false
+): NetworkGuard {
   const room = useRoomContext();
   const [limited, setLimited] = useState(false);
   const limitedRef = useRef(false);
@@ -78,6 +107,9 @@ export function useNetworkGuard(lossPct: number | null): NetworkGuard {
     // around 3% loss doesn't flip the cap on and off.
   }, [lossPct, room]);
 
+  const ceilingRef = useRef<VideoQuality | null>(null);
+  ceilingRef.current = webinarCeiling(isWebinar);
+
   // ----- Apply it to every remote camera stream -----
   useEffect(() => {
     if (!room) return;
@@ -88,10 +120,16 @@ export function useNetworkGuard(lossPct: number | null): NetworkGuard {
       // static, so they cost far less than their resolution suggests.
       if (pub.source === Track.Source.ScreenShare) return;
       try {
-        // HIGH lifts the ceiling rather than demanding the top layer:
+        // Two ceilings, and the lower wins: the standing webinar setting, and
+        // the temporary one this guard applies when the link is struggling.
+        // HIGH means "no ceiling" rather than a demand for the top layer —
         // adaptiveStream still picks the size from the tile.
+        const guard = limitedRef.current ? VideoQuality.MEDIUM : VideoQuality.HIGH;
+        const standing = ceilingRef.current;
+        // VideoQuality is ordered LOW < MEDIUM < HIGH, so the smaller number is
+        // the stricter cap.
         pub.setVideoQuality(
-          limitedRef.current ? VideoQuality.MEDIUM : VideoQuality.HIGH
+          standing === null ? guard : (Math.min(guard, standing) as VideoQuality)
         );
       } catch {
         /* a stream that just went away isn't worth reporting */
@@ -114,7 +152,17 @@ export function useNetworkGuard(lossPct: number | null): NetworkGuard {
       room.off(RoomEvent.TrackSubscribed, applyAll);
       room.off(RoomEvent.ParticipantConnected, applyAll);
     };
-  }, [room, limited]);
+  }, [room, limited, isWebinar]);
 
-  return { limited, capLabel: limited ? "360p" : null };
+  const standing = webinarCeiling(isWebinar);
+  return {
+    limited,
+    capLabel: limited
+      ? "360p"
+      : standing === VideoQuality.LOW
+        ? "180p (webinar setting)"
+        : standing === VideoQuality.MEDIUM
+          ? "360p (webinar setting)"
+          : null,
+  };
 }
