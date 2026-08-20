@@ -42,13 +42,15 @@ export function BrandLogo({
   name,
   alt,
   className,
-  plateClassName = "bg-white rounded-md px-2 py-0.5 sm:px-3 sm:py-1 flex items-center min-w-0",
+  // No surface by default: the marks are transparent PNGs and sit straight on
+  // the bar. A caller that needs one can still pass it.
+  plateClassName = "flex items-center min-w-0",
 }: {
   /** Filename without an extension, e.g. "logo-bluderma". */
   name: string;
   alt: string;
   className?: string;
-  /** The surface behind the mark. Both logos are dark art on a dark bar. */
+  /** Optional surface behind the mark, for a bar it would disappear into. */
   plateClassName?: string;
 }) {
   // .png first because that is what ships in public/ today: the marks are

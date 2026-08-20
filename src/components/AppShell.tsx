@@ -185,9 +185,7 @@ export default function AppShell({
       {/* Right side: header + content */}
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="h-12 sm:h-14 shrink-0 bg-teams-purple text-white flex items-center px-3 sm:px-4 justify-between shadow z-10">
-          {/* Both marks are dark artwork and the bar is near-black, so each
-              carries its own white plate — and loses it if the file is absent,
-              rather than leaving an empty white pill behind. */}
+          {/* The marks are transparent PNGs and sit straight on the bar. */}
           <BrandLogo
             name="logo-bluderma"
             alt="BluDerma"
@@ -198,7 +196,7 @@ export default function AppShell({
               name="logo-madenkorea"
               alt="Made N Korea"
               className="h-[30px] sm:h-10 w-auto object-contain"
-              plateClassName="bg-white rounded-md px-2 py-0.5 sm:px-2.5 sm:py-1 hidden sm:flex items-center"
+              plateClassName="hidden sm:flex items-center"
             />
             <ThemeSwitcher />
             <span className="text-sm hidden sm:block opacity-90">
