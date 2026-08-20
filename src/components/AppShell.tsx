@@ -189,13 +189,13 @@ export default function AppShell({
               carries its own white plate — and loses it if the file is absent,
               rather than leaving an empty white pill behind. */}
           <BrandLogo
-            src="/logo-bluderma.png"
+            name="logo-bluderma"
             alt="BluDerma"
             className="h-5 sm:h-7 w-auto object-contain"
           />
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <BrandLogo
-              src="/logo-madenkorea.png"
+              name="logo-madenkorea"
               alt="Made N Korea"
               className="h-5 sm:h-7 w-auto object-contain"
               plateClassName="bg-white rounded-md px-2 py-1 sm:px-2.5 sm:py-1.5 hidden sm:flex items-center"

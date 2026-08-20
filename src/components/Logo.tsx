@@ -25,37 +25,42 @@ export default function Logo({ className }: { className?: string }) {
 }
 
 /**
- * A brand mark that simply isn't there when its file isn't there.
+ * A brand mark that tries a few filenames, and isn't there when none of them
+ * are.
  *
- * The plate is drawn here rather than by the caller, and that is the whole
- * point: hiding only the image left its white background behind, so a missing
- * file showed as an empty white pill in the navbar — worse than showing
- * nothing. Now the mark and the surface it sits on disappear together.
+ * The artwork is dropped into public/ by hand rather than committed, so the
+ * usual failure is not a missing logo but a slightly different filename — .jpg
+ * instead of .png, or the vector. Trying each in turn costs one 404 and saves
+ * a round of "why is it still not showing".
  *
- * The artwork is dropped into public/ rather than committed through code, so
- * between deploying and adding the file the src legitimately 404s.
+ * The plate is drawn here rather than by the caller, and that is deliberate:
+ * hiding only the image left its white background behind, so a missing file
+ * showed as an empty white pill in the navbar. Now the mark and the surface it
+ * sits on disappear together.
  */
 export function BrandLogo({
-  src,
+  name,
   alt,
   className,
   plateClassName = "bg-white rounded-md px-2 py-1 sm:px-3 sm:py-1.5 flex items-center min-w-0",
 }: {
-  src: string;
+  /** Filename without an extension, e.g. "logo-bluderma". */
+  name: string;
   alt: string;
   className?: string;
   /** The surface behind the mark. Both logos are dark art on a dark bar. */
   plateClassName?: string;
 }) {
-  const [missing, setMissing] = useState(false);
-  if (missing) return null;
+  const candidates = [`/${name}.png`, `/${name}.jpg`, `/${name}.svg`];
+  const [attempt, setAttempt] = useState(0);
+  if (attempt >= candidates.length) return null;
   return (
     <span className={plateClassName}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={src}
+        src={candidates[attempt]}
         alt={alt}
-        onError={() => setMissing(true)}
+        onError={() => setAttempt((n) => n + 1)}
         className={className}
       />
     </span>
