@@ -185,19 +185,25 @@ export default function AppShell({
       {/* Right side: header + content */}
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="h-12 sm:h-14 shrink-0 bg-teams-purple text-white flex items-center px-3 sm:px-4 justify-between shadow z-10">
-          {/* These marks carry their own white background, so the container
-              rounds and clips it rather than leaving a hard rectangle. */}
+          {/* The white is part of the artwork, and in the BluDerma file the
+              wordmark is a thin band with wide margins above and below: at 40px
+              tall the letters were only about 8px. So the box is set explicitly
+              and the image covers it, which crops the margin away instead of
+              scaling it up along with everything else. */}
           <BrandLogo
             name="logo-bluderma"
             alt="BluDerma"
-            className="h-[30px] sm:h-10 w-auto object-contain"
+            className="w-full h-full object-cover"
+            plateClassName="rounded-md overflow-hidden flex items-center shrink-0 w-[190px] h-9 sm:w-[260px] sm:h-11"
           />
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            {/* This mark nearly fills its own canvas, so it only needs to be
+                taller — no cropping. */}
             <BrandLogo
               name="logo-madenkorea"
               alt="Made N Korea"
-              className="h-[30px] sm:h-10 w-auto object-contain"
-              plateClassName="hidden sm:flex items-center rounded-md overflow-hidden"
+              className="h-11 w-auto object-contain"
+              plateClassName="hidden sm:flex items-center rounded-md overflow-hidden shrink-0"
             />
             <ThemeSwitcher />
             <span className="text-sm hidden sm:block opacity-90">
