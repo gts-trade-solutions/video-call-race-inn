@@ -86,6 +86,9 @@ const ALONE_GRACE_MS = 4000;
  */
 const MAX_SPOTLIGHT = 16;
 
+/** Roughly how tall a row menu gets, for deciding whether to open it upward. */
+const MENU_HEIGHT_PX = 240;
+
 type Panel = "none" | "chat" | "people" | "effects" | "notes";
 type WaitingPerson = {
   userId: number;
@@ -2419,6 +2422,50 @@ function PeoplePanel({
   onError: (text: string) => void;
 }) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  /**
+   * Where to draw the open menu, in viewport coordinates.
+   *
+   * It used to be positioned against its own row, which put it inside the
+   * scrolling list — and a scroll container clips anything that reaches past
+   * its edge, so the menu on the last few rows was cut in half or invisible.
+   * Anchoring to the viewport instead takes it out of that box entirely.
+   */
+  const [menuAt, setMenuAt] = useState<{
+    right: number;
+    top?: number;
+    bottom?: number;
+  } | null>(null);
+
+  const openMenuAt = (el: HTMLElement, identity: string) => {
+    if (menuFor === identity) {
+      setMenuFor(null);
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    // Flip upward when there isn't room below, so the menu never opens off
+    // the bottom of the window for the last person in a long list.
+    const roomBelow = window.innerHeight - r.bottom;
+    setMenuAt({
+      right: Math.max(8, window.innerWidth - r.right),
+      ...(roomBelow < MENU_HEIGHT_PX
+        ? { bottom: Math.max(8, window.innerHeight - r.top + 4) }
+        : { top: r.bottom + 4 }),
+    });
+    setMenuFor(identity);
+  };
+
+  // A menu pinned to the viewport would drift away from its row if the list
+  // moved underneath it, so scrolling closes it rather than chasing it.
+  useEffect(() => {
+    if (!menuFor) return;
+    const close = () => setMenuFor(null);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [menuFor]);
 
   // Raised hands float to the top, in the order they went up — the panel
   // doubles as the speaking queue.
@@ -2603,9 +2650,7 @@ function PeoplePanel({
 
               {showMenu && (
                 <button
-                  onClick={() =>
-                    setMenuFor((cur) => (cur === p.identity ? null : p.identity))
-                  }
+                  onClick={(e) => openMenuAt(e.currentTarget, p.identity)}
                   aria-label={`More options for ${name}`}
                   title="More options"
                   className="w-7 h-7 shrink-0 flex items-center justify-center rounded hover:bg-white/10 text-gray-300"
@@ -2622,7 +2667,15 @@ function PeoplePanel({
                     onClick={() => setMenuFor(null)}
                     className="fixed inset-0 z-20 cursor-default"
                   />
-                  <div className="absolute right-2 top-11 z-30 w-52 bg-teams-stage border border-white/15 rounded-lg shadow-2xl py-1 text-sm">
+                  <div
+                    style={{
+                      position: "fixed",
+                      right: menuAt?.right,
+                      top: menuAt?.top,
+                      bottom: menuAt?.bottom,
+                    }}
+                    className="z-30 w-52 bg-teams-stage border border-white/15 rounded-lg shadow-2xl py-1 text-sm"
+                  >
                     {canLowerHand && (
                       <MenuItem
                         onClick={() => {
