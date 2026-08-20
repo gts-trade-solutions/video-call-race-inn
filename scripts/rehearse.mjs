@@ -181,7 +181,7 @@ async function main() {
   console.log(`     lk load-test \\`);
   console.log(`       --url ${lkUrl} \\`);
   console.log(`       --api-key ${env.LIVEKIT_API_KEY || "<LIVEKIT_API_KEY>"} \\`);
-  console.log(`       --api-secret <LIVEKIT_API_SECRET> \\`);
+  console.log(`       --api-secret "$(grep -E '^LIVEKIT_API_SECRET=' .env.local | cut -d= -f2-)" \\`);
   console.log(`       --room ${room} \\`);
   console.log(`       --subscribers ${people} \\`);
   console.log(`       --duration 5m\n`);
