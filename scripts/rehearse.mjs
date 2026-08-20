@@ -115,11 +115,32 @@ async function main() {
     "SELECT id, name, email FROM users WHERE email = :e LIMIT 1",
     { e: email.toLowerCase() }
   );
-  await c.end();
   if (rows.length === 0) {
-    console.error(`\nNo account with the email ${email}.\n`);
+    // Do not just say no. This script is meant to be run in a hurry, and
+    // hunting for the right address in a database is the last thing anyone
+    // wants to be doing at that moment.
+    const [others] = await c.query(
+      `SELECT name, email FROM users
+        WHERE email NOT LIKE 'zz-%@example.test'
+        ORDER BY id DESC LIMIT 10`
+    );
+    await c.end();
+    console.error(`\nNo account with the email ${email}.`);
+    if (others.length) {
+      console.error("\nAccounts on this server (most recent first):\n");
+      for (const u of others) console.error(`  ${u.email}   (${u.name})`);
+      console.error("\nRe-run with whichever one will host:\n");
+      console.error(
+        `  node scripts/rehearse.mjs ${others[0].email} ${people}` +
+          (base.origin === "http://localhost:3000" ? "" : ` --url ${base.origin}`) +
+          "\n"
+      );
+    } else {
+      console.error("\nThere are no accounts yet — sign up in the app first.\n");
+    }
     process.exit(1);
   }
+  await c.end();
   const host = rows[0];
 
   const token = await new SignJWT({
