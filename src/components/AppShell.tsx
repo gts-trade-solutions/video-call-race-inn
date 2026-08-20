@@ -197,13 +197,16 @@ export default function AppShell({
             plateClassName="rounded-md overflow-hidden flex items-center shrink-0 w-[190px] h-9 sm:w-[260px] sm:h-11"
           />
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            {/* This mark nearly fills its own canvas, so it only needs to be
-                taller — no cropping. */}
+            {/* This mark reaches close to the edges of its own canvas — the two
+                arcs almost touch the top and bottom — so rounding the container
+                was cutting their ends off. The white padding gives the corners
+                something to clip that isn't artwork, and matches the white
+                already baked into the file, so the join is invisible. */}
             <BrandLogo
               name="logo-madenkorea"
               alt="Made N Korea"
-              className="h-11 w-auto object-contain"
-              plateClassName="hidden sm:flex items-center rounded-md overflow-hidden shrink-0"
+              className="h-10 w-auto object-contain"
+              plateClassName="hidden sm:flex items-center rounded-md shrink-0 bg-white px-1.5 py-1"
             />
             <ThemeSwitcher />
             <span className="text-sm hidden sm:block opacity-90">
