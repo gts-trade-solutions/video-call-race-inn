@@ -178,13 +178,14 @@ async function main() {
   console.log(`     ${link}\n`);
 
   console.log(`  2. Once you are in, run this in a second terminal:\n`);
+  console.log(`     export LIVEKIT_URL="$(grep -E '^LIVEKIT_URL=' .env.local | cut -d= -f2-)"`);
+  console.log(`     export LIVEKIT_API_KEY="$(grep -E '^LIVEKIT_API_KEY=' .env.local | cut -d= -f2-)"`);
+  console.log(`     export LIVEKIT_API_SECRET="$(grep -E '^LIVEKIT_API_SECRET=' .env.local | cut -d= -f2-)"`);
+  console.log("");
   console.log(`     lk load-test \\`);
-  console.log(`       --url ${lkUrl} \\`);
-  console.log(`       --api-key ${env.LIVEKIT_API_KEY || "<LIVEKIT_API_KEY>"} \\`);
-  console.log(`       --api-secret "$(grep -E '^LIVEKIT_API_SECRET=' .env.local | cut -d= -f2-)" \\`);
   console.log(`       --room ${room} \\`);
   console.log(`       --subscribers ${people} \\`);
-  console.log(`       --duration 5m\n`);
+  console.log(`       --duration 5m` + "\n");
   console.log(`     Not installed? ${installLiveKitCli()[0]}`);
   console.log(`     Flags vary by version — check  lk load-test --help\n`);
 
