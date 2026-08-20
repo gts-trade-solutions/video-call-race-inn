@@ -985,8 +985,12 @@ export default function TeamsCall({
 
         {/* ---------- Body: stage + side panel ---------- */}
         <div className="flex flex-1 min-h-0 relative">
+          {/* Stage column: the video and the controls under it. The side
+              panel sits beside this pair, so it runs the full height rather
+              than stopping short above the control bar. */}
+          <div className="flex flex-col flex-1 min-w-0">
           <main
-            className={`relative flex-1 min-w-0 ${
+            className={`relative flex-1 min-h-0 ${
               mobileGridActive ? "p-0" : "p-3 sm:p-4"
             }`}
             onClick={
@@ -1065,72 +1069,6 @@ export default function TeamsCall({
               <CaptionOverlay captions={captions} />
             )}
           </main>
-
-          {panel !== "none" && (
-            <aside className="absolute inset-0 z-30 sm:static sm:z-auto w-full sm:w-80 shrink-0 bg-teams-stage sm:border-l border-white/10 flex flex-col">
-              {panel === "chat" ? (
-                <ChatPanel
-                  messages={chatMsgs}
-                  onSend={sendChat}
-                  onClose={() => setPanel("none")}
-                />
-              ) : panel === "effects" ? (
-                <PanelShell
-                  title="Video effects"
-                  onClose={() => setPanel("none")}
-                >
-                  <EffectsPanel effects={effects} onNotice={notify} />
-                </PanelShell>
-              ) : panel === "notes" && NOTE_TAKER_ENABLED ? (
-                <PanelShell
-                  title="Meeting notes"
-                  onClose={() => setPanel("none")}
-                >
-                  <NotesPanel
-                    captions={captions}
-                    room={room}
-                    title={title}
-                    onNotice={notify}
-                  />
-                </PanelShell>
-              ) : (
-                <PeoplePanel
-                  participants={participants}
-                  onClose={() => setPanel("none")}
-                  roles={roles}
-                  hands={hands}
-                  control={shareControl}
-                  spotlights={spotlights}
-                  onSpotlightAll={toggleSpotlight}
-                  onClearSpotlights={clearSpotlights}
-                  lobbyEnabled={lobbyEnabled}
-                  onSetLobby={setLobby}
-                  onError={notify}
-                />
-              )}
-            </aside>
-          )}
-
-          {/* Landscape-phone control rail (Teams style, right edge). */}
-          {railMode && !hideChrome && (
-            <ControlRail
-              isMicrophoneEnabled={isMicrophoneEnabled}
-              isCameraEnabled={isCameraEnabled}
-              myHandUp={hands.myHandUp}
-              onToggleHand={toggleMyHand}
-              canManage={canManage}
-              recording={recording}
-              recBusy={recBusy}
-              onToggleRecording={toggleRecording}
-              onShare={toggleShare}
-              onFlipCamera={hasTwoCameras ? flipCamera : undefined}
-              onOpenPanel={(p) => setPanel(panel === p ? "none" : p)}
-              onReact={sendReaction}
-              unread={unread}
-              participants={participants.length}
-            />
-          )}
-        </div>
 
         {/* ---------- Control pill (bottom bar; landscape phones use the rail) ---------- */}
         <footer
@@ -1345,6 +1283,73 @@ export default function TeamsCall({
             </DisconnectButton>
           </div>
         </footer>
+          </div>
+
+          {panel !== "none" && (
+            <aside className="absolute inset-0 z-30 sm:static sm:z-auto w-full sm:w-80 shrink-0 bg-teams-stage sm:border-l border-white/10 flex flex-col">
+              {panel === "chat" ? (
+                <ChatPanel
+                  messages={chatMsgs}
+                  onSend={sendChat}
+                  onClose={() => setPanel("none")}
+                />
+              ) : panel === "effects" ? (
+                <PanelShell
+                  title="Video effects"
+                  onClose={() => setPanel("none")}
+                >
+                  <EffectsPanel effects={effects} onNotice={notify} />
+                </PanelShell>
+              ) : panel === "notes" && NOTE_TAKER_ENABLED ? (
+                <PanelShell
+                  title="Meeting notes"
+                  onClose={() => setPanel("none")}
+                >
+                  <NotesPanel
+                    captions={captions}
+                    room={room}
+                    title={title}
+                    onNotice={notify}
+                  />
+                </PanelShell>
+              ) : (
+                <PeoplePanel
+                  participants={participants}
+                  onClose={() => setPanel("none")}
+                  roles={roles}
+                  hands={hands}
+                  control={shareControl}
+                  spotlights={spotlights}
+                  onSpotlightAll={toggleSpotlight}
+                  onClearSpotlights={clearSpotlights}
+                  lobbyEnabled={lobbyEnabled}
+                  onSetLobby={setLobby}
+                  onError={notify}
+                />
+              )}
+            </aside>
+          )}
+
+          {/* Landscape-phone control rail (Teams style, right edge). */}
+          {railMode && !hideChrome && (
+            <ControlRail
+              isMicrophoneEnabled={isMicrophoneEnabled}
+              isCameraEnabled={isCameraEnabled}
+              myHandUp={hands.myHandUp}
+              onToggleHand={toggleMyHand}
+              canManage={canManage}
+              recording={recording}
+              recBusy={recBusy}
+              onToggleRecording={toggleRecording}
+              onShare={toggleShare}
+              onFlipCamera={hasTwoCameras ? flipCamera : undefined}
+              onOpenPanel={(p) => setPanel(panel === p ? "none" : p)}
+              onReact={sendReaction}
+              unread={unread}
+              participants={participants.length}
+            />
+          )}
+        </div>
       </div>
     </HandsContext.Provider>
   );
