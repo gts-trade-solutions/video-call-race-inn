@@ -107,7 +107,7 @@ export default function RecentCalls() {
     if (ok) {
       setNote(
         next
-          ? `${row.personName} is blocked — their calls won't ring you.`
+          ? `${row.personName} is blocked. Their calls won't ring you.`
           : `${row.personName} is unblocked.`
       );
       setTimeout(() => setNote(null), 4000);

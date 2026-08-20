@@ -298,7 +298,7 @@ export default function TeamsCall({
     if (isWebinar) return;
     if (peakParticipants.current !== 2 || participants.length !== 1) return;
     const t = setTimeout(() => {
-      notify("The other person left — ending the call");
+      notify("The other person left. Ending the call.");
       // Give the toast a beat to be seen before the screen changes.
       setTimeout(() => lkRoom.disconnect().catch(() => {}), 900);
     }, ALONE_GRACE_MS);
@@ -320,7 +320,7 @@ export default function TeamsCall({
     const t = setTimeout(() => {
       if (!hands.myHandUp) return;
       hands.toggleHand();
-      notify("Hand lowered — you're speaking");
+      notify("You're speaking, so your hand is down.");
     }, AUTO_LOWER_MS);
     return () => clearTimeout(t);
   }, [hands, localParticipant?.isSpeaking, notify]);
@@ -563,7 +563,7 @@ export default function TeamsCall({
         // image (captureStream only emits when the canvas changes).
         const timer = setInterval(draw, 1000);
         photoShare.current = { track, timer };
-        notify("Presenting your photo — tap Stop to end.");
+        notify("You're presenting a photo. Tap Stop to end.");
       } catch (e) {
         console.error("photo presenting error:", e);
         notify("Couldn't present that image on this device.");
@@ -595,7 +595,7 @@ export default function TeamsCall({
 
     // No capture API at all (phones, in-app browsers): present a photo.
     if (!navigator.mediaDevices?.getDisplayMedia) {
-      notify("Screen sharing isn't available here — pick a photo to present.");
+      notify("Screen sharing isn't available on this device. Pick a photo to present instead.");
       photoInputRef.current?.click();
       return;
     }
@@ -625,7 +625,7 @@ export default function TeamsCall({
       console.error("screen share error:", e);
       // Some phone browsers expose getDisplayMedia but reject the call, so a
       // failure here lands on the same photo fallback rather than a dead end.
-      notify("Screen sharing didn't start — pick a photo to present instead.");
+      notify("Screen sharing didn't start. Pick a photo to present instead.");
       photoInputRef.current?.click();
     } finally {
       setShareBusy(false);
@@ -801,8 +801,8 @@ export default function TeamsCall({
         if (!res.ok) throw new Error();
         notify(
           enabled
-            ? "Waiting room on — new people need admitting"
-            : "Waiting room off — anyone with the link joins straight away"
+            ? "Waiting room is on. You admit each new person."
+            : "Waiting room is off. Anyone with the link joins straight away."
         );
       } catch {
         setLobbyEnabled(!enabled);
@@ -910,7 +910,7 @@ export default function TeamsCall({
       <div className="flex flex-col h-full bg-teams-darker text-white overflow-x-hidden">
         <RoomAudioRenderer />
         <ConnectionStateToast />
-        <FloatingReactions />
+        <FloatingReactions nameOf={nameOf} />
         <Toasts items={toasts} />
 
         {shareControl.amPresenter && shareControl.requests.length > 0 && (
@@ -1087,8 +1087,8 @@ export default function TeamsCall({
                     which "You're listening" left the reader to work out. */}
                 <span className="hidden sm:inline">
                   {hands.myHandUp
-                    ? "Hand raised — the host has been told"
-                    : "Listening only — raise your hand to speak"}
+                    ? "Your hand is up. The host has been told."
+                    : "You can listen. Raise your hand to speak."}
                 </span>
                 {/* The short form has to change too. It used to read
                     "Listening" whether or not a hand was up, so on a phone
@@ -2098,7 +2098,7 @@ function ControlButton({ control }: { control: UseShareControl }) {
     <button
       onClick={control.requestControl}
       disabled={control.requestPending}
-      title="Ask the presenter for control — you get a shared pointer on their screen"
+      title="Ask the presenter for control. You get a shared pointer on their screen."
       className={ctrlBtn(false) + " disabled:opacity-50"}
     >
       <CursorIcon />
@@ -2855,7 +2855,7 @@ function LatencyPill({
           e.stopPropagation();
           setOpen((o) => !o);
         }}
-        title="Connection latency — tap for details"
+        title="Connection latency. Tap for details."
         className={`flex items-center gap-1.5 text-xs font-medium border rounded-md px-2 py-1 tabular-nums ${tone}`}
       >
         <SignalIcon />
@@ -3050,18 +3050,26 @@ function ReactionButton() {
   );
 }
 
-function FloatingReactions() {
-  const [items, setItems] = useState<{ id: number; emoji: string }[]>([]);
+function FloatingReactions({
+  nameOf,
+}: {
+  nameOf: (identity: string) => string;
+}) {
+  const [items, setItems] = useState<
+    { id: number; emoji: string; who: string }[]
+  >([]);
 
-  // Incoming reactions from others.
+  // Incoming reactions from others. The name travels with it: an emoji drifting
+  // up the screen says something happened but not who it came from, which in a
+  // room of any size is the part people actually want.
   useDataChannel("reactions", (msg) => {
     const emoji = new TextDecoder().decode(msg.payload);
-    addItem(emoji);
+    addItem(emoji, msg.from?.identity ? nameOf(msg.from.identity) : "Someone");
   });
 
-  function addItem(emoji: string) {
+  function addItem(emoji: string, who: string) {
     const id = Date.now() + Math.random();
-    setItems((prev) => [...prev, { id, emoji }]);
+    setItems((prev) => [...prev, { id, emoji, who }]);
     setTimeout(() => {
       setItems((prev) => prev.filter((i) => i.id !== id));
     }, 3000);
@@ -3069,7 +3077,7 @@ function FloatingReactions() {
 
   // Our own reactions (so we see them too).
   useEffect(() => {
-    const h = (e: Event) => addItem((e as CustomEvent).detail);
+    const h = (e: Event) => addItem((e as CustomEvent).detail, "You");
     window.addEventListener("local-reaction", h);
     return () => window.removeEventListener("local-reaction", h);
   }, []);
@@ -3079,10 +3087,13 @@ function FloatingReactions() {
       {items.map((i) => (
         <span
           key={i.id}
-          className="absolute bottom-24 left-1/2 text-4xl reaction-float"
+          className="absolute bottom-24 left-1/2 flex flex-col items-center gap-1 reaction-float"
           style={{ marginLeft: (i.id % 200) - 100 }}
         >
-          {i.emoji}
+          <span className="text-4xl leading-none">{i.emoji}</span>
+          <span className="text-[11px] font-medium text-white bg-black/70 rounded-full px-2 py-0.5 whitespace-nowrap max-w-[9rem] truncate">
+            {i.who}
+          </span>
         </span>
       ))}
     </div>

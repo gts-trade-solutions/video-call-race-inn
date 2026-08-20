@@ -149,7 +149,7 @@ export async function POST(req: Request) {
     const rl = rateLimit(`ring:${user.id}`, 20, MINUTE);
     if (!rl.ok) {
       return NextResponse.json(
-        { error: "Too many calls — slow down a little." },
+        { error: "Too many calls. Slow down a little." },
         { status: 429 }
       );
     }

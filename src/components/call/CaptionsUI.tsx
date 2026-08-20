@@ -80,7 +80,7 @@ export function NotesPanel({
       if (!res.ok) throw new Error("failed");
       setSummary(await res.json());
     } catch {
-      onNotice("Couldn't build the summary — try again in a moment.");
+      onNotice("Couldn't build the summary. Try again in a moment.");
     } finally {
       setSummaryBusy(false);
     }
@@ -95,7 +95,7 @@ export function NotesPanel({
   async function copyAll() {
     try {
       await navigator.clipboard.writeText(text());
-      onNotice("Notes copied — paste them into any AI assistant for a summary.");
+      onNotice("Notes copied. Paste them into any AI assistant for a summary.");
     } catch {
       onNotice("Couldn't copy. Use Download instead.");
     }

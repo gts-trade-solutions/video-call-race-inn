@@ -355,10 +355,10 @@ export default function EffectsPanel({
                 honest preview — but a phone photo loses most of its height and
                 that surprises people who haven't been told. */}
             <p className="text-[11px] text-gray-400 mt-3 leading-snug">
-              Applied straight away, and everyone sees it. Any shape works —
-              a photo the shape of the video fills it, and anything else (a logo,
-              a square, a phone photo) is shown whole on its own colour rather
-              than being cropped.
+              Applied straight away, and everyone sees it. Any shape works. A
+              photo the same shape as the video fills the frame. Anything else,
+              like a logo or a phone photo, is shown whole on its own colour
+              instead of being cropped.
             </p>
           </>
         )}

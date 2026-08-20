@@ -323,7 +323,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          "That didn't reach the meeting — the person may have left, or the media server is unreachable.",
+          "That didn't reach the meeting. The person may have left, or the media server is unreachable.",
       },
       { status: 409 }
     );

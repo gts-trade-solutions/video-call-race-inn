@@ -44,7 +44,7 @@ export function ScheduleModal({
       return;
     }
     if (new Date(when).getTime() < Date.now() - 60_000) {
-      setErr("That time is in the past — pick a future time.");
+      setErr("That time has already passed. Pick a future time.");
       return;
     }
     setSaving(true);
@@ -73,7 +73,7 @@ export function ScheduleModal({
             ? `${d.emailed} of ${d.invited} invitation email${
                 d.invited === 1 ? "" : "s"
               } sent`
-            : `${d.invited} invited (email isn't configured — share the link)`
+            : `${d.invited} invited. Email isn't set up, so share the link.`
         );
       }
       onScheduled(bits.join(" · "));

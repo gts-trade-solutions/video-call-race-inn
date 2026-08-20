@@ -89,7 +89,7 @@ export async function POST(req: Request) {
     const rl = rateLimit(`meetings:${user.id}`, 15, MINUTE);
     if (!rl.ok) {
       return NextResponse.json(
-        { error: "Too many meetings created — try again in a minute." },
+        { error: "Too many meetings created. Try again in a minute." },
         { status: 429 }
       );
     }

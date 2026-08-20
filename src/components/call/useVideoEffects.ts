@@ -34,7 +34,15 @@ export function effectKey(e: VideoEffect): string {
   return e.mode === "image" ? `image:${e.src}` : e.mode;
 }
 
-const BLUR_RADIUS = 12;
+/**
+ * Blur strength. Higher hides more of the room behind you.
+ *
+ * 12 left furniture and doorways readable, which rather defeats the point of
+ * turning it on. 25 reduces the background to shapes and colour while still
+ * looking like a blurred room rather than a flat wash — Teams and Meet both sit
+ * around this strength.
+ */
+const BLUR_RADIUS = 25;
 // Serve the segmentation model + WASM from our own origin. The defaults hit
 // jsdelivr + storage.googleapis.com at runtime; if those are blocked the
 // processor still starts but renders BLACK FRAMES instead of video.
