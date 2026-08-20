@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { ensureSchema, getPool } from "@/lib/db";
-import { hashPassword, createSession } from "@/lib/auth";
+import { hashPassword, createSession, forgetPasswordEpoch } from "@/lib/auth";
 import { rateLimit, clientIp, HOUR } from "@/lib/rateLimit";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
@@ -120,10 +120,14 @@ export async function POST(req: Request) {
 
     // Correct code → set the new password and burn the code.
     const password_hash = await hashPassword(String(password));
+    // Stamping the change is what ends sessions elsewhere: anything issued
+    // before this instant is refused from here on, which is the point of a
+    // reset when the old password is the thing you're worried about.
     await pool.query<ResultSetHeader>(
-      "UPDATE users SET password_hash = :hash WHERE id = :uid",
+      "UPDATE users SET password_hash = :hash, password_changed_at = NOW() WHERE id = :uid",
       { hash: password_hash, uid: user.id }
     );
+    forgetPasswordEpoch(user.id);
     await pool.query<ResultSetHeader>(
       "UPDATE password_resets SET used_at = NOW() WHERE user_id = :uid AND used_at IS NULL",
       { uid: user.id }

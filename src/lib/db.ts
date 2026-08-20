@@ -426,6 +426,16 @@ export function ensureSchema(): Promise<void> {
       }
 
       // Migration: presence — last activity timestamp.
+      // Sessions issued before this instant are refused, so resetting a
+      // password actually ends the sessions of whoever knew the old one.
+      try {
+        await pool.query(
+          "ALTER TABLE users ADD COLUMN password_changed_at TIMESTAMP NULL DEFAULT NULL"
+        );
+      } catch (e) {
+        if ((e as { errno?: number }).errno !== 1060) throw e;
+      }
+
       try {
         await pool.query(
           "ALTER TABLE users ADD COLUMN last_seen TIMESTAMP NULL DEFAULT NULL"

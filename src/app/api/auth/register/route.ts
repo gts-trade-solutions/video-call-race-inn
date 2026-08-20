@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureSchema, getPool, DBUser } from "@/lib/db";
 import { hashPassword, createSession } from "@/lib/auth";
+import { rateLimit, clientIp, MINUTE } from "@/lib/rateLimit";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
 // Client-side checks are a convenience only — anything reaching this route
@@ -10,6 +11,19 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export async function POST(req: Request) {
   try {
     await ensureSchema();
+
+    // Login, forgot and reset were all rate limited; registration was not, so
+    // the one endpoint that *creates* rows was the one anybody could call in a
+    // loop. A person signs up once, so this is generous for real use and still
+    // stops a script filling the users table.
+    const rl = rateLimit(`register:ip:${clientIp(req)}`, 5, 10 * MINUTE);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "Too many sign-up attempts. Try again in a few minutes." },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+      );
+    }
+
     const { name, email, password } = await req.json();
 
     if (!name || !email || !password) {

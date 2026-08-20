@@ -103,6 +103,29 @@ export function invalidateMeetingRole(room: string) {
 }
 
 /**
+ * Both caches are keyed by things that keep arriving — rooms, and people in
+ * rooms — and nothing was removing entries, only overwriting stale ones. Read
+ * as a whole that is a slow leak in a process meant to run for weeks: every
+ * meeting ever held keeps a row, and every person who ever joined one keeps
+ * another. Sweeping on a timer costs nothing next to that.
+ */
+const SWEEP_EVERY_MS = 10 * 60_000;
+let sweptAt = 0;
+
+function sweepCaches(now: number) {
+  if (now - sweptAt < SWEEP_EVERY_MS) return;
+  sweptAt = now;
+  // Deleting during forEach is safe for Map, and forEach avoids needing
+  // downlevelIteration for the current TS target.
+  roomFacts().forEach((facts, room) => {
+    if (now - facts.at > ROOM_TTL_MS) roomFacts().delete(room);
+  });
+  participantSeen().forEach((at, key) => {
+    if (now - at > PARTICIPANT_TTL_MS) participantSeen().delete(key);
+  });
+}
+
+/**
  * Resolves the caller's role in `room`, or null when the meeting doesn't exist.
  */
 export async function getMeetingRole(
@@ -111,6 +134,7 @@ export async function getMeetingRole(
 ): Promise<MeetingRole | null> {
   const pool = getPool();
   const now = Date.now();
+  sweepCaches(now);
 
   let facts = roomFacts().get(room);
   if (!facts || now - facts.at > ROOM_TTL_MS) {
