@@ -1136,12 +1136,20 @@ export default function TeamsCall({
             {!iCanPublish && (
               <span className="flex items-center gap-1.5 text-xs text-gray-300 bg-white/5 rounded-xl px-3 py-2">
                 <HeadphonesIcon />
+                {/* Says the state first, then what to do about it. "Listening
+                    only" explains why the mic and camera buttons are absent,
+                    which "You're listening" left the reader to work out. */}
                 <span className="hidden sm:inline">
                   {hands.myHandUp
-                    ? "Hand raised — waiting for the host"
-                    : "You're listening — raise your hand to speak"}
+                    ? "Hand raised — the host has been told"
+                    : "Listening only — raise your hand to speak"}
                 </span>
-                <span className="sm:hidden">Listening</span>
+                {/* The short form has to change too. It used to read
+                    "Listening" whether or not a hand was up, so on a phone
+                    there was nothing at all to confirm the tap registered. */}
+                <span className="sm:hidden">
+                  {hands.myHandUp ? "Hand raised" : "Listening only"}
+                </span>
               </span>
             )}
 
