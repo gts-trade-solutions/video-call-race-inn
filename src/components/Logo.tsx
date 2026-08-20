@@ -42,7 +42,7 @@ export function BrandLogo({
   name,
   alt,
   className,
-  plateClassName = "bg-white rounded-md px-2 py-1 sm:px-3 sm:py-1.5 flex items-center min-w-0",
+  plateClassName = "bg-white rounded-md px-2 py-0.5 sm:px-3 sm:py-1 flex items-center min-w-0",
 }: {
   /** Filename without an extension, e.g. "logo-bluderma". */
   name: string;

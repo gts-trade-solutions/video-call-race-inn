@@ -191,14 +191,14 @@ export default function AppShell({
           <BrandLogo
             name="logo-bluderma"
             alt="BluDerma"
-            className="h-5 sm:h-7 w-auto object-contain"
+            className="h-[30px] sm:h-10 w-auto object-contain"
           />
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <BrandLogo
               name="logo-madenkorea"
               alt="Made N Korea"
-              className="h-5 sm:h-7 w-auto object-contain"
-              plateClassName="bg-white rounded-md px-2 py-1 sm:px-2.5 sm:py-1.5 hidden sm:flex items-center"
+              className="h-[30px] sm:h-10 w-auto object-contain"
+              plateClassName="bg-white rounded-md px-2 py-0.5 sm:px-2.5 sm:py-1 hidden sm:flex items-center"
             />
             <ThemeSwitcher />
             <span className="text-sm hidden sm:block opacity-90">
