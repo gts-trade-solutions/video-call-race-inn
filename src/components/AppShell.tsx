@@ -185,16 +185,17 @@ export default function AppShell({
       {/* Right side: header + content */}
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="h-12 sm:h-14 shrink-0 bg-teams-purple text-white flex items-center px-3 sm:px-4 justify-between shadow z-10">
-          {/* The white is part of the artwork, and in the BluDerma file the
-              wordmark is a thin band with wide margins above and below: at 40px
-              tall the letters were only about 8px. So the box is set explicitly
-              and the image covers it, which crops the margin away instead of
-              scaling it up along with everything else. */}
+          {/* The wordmark sits in the middle of its file with wide white
+              margins all round: a band about a fifth of the height, and 19% of
+              the width empty at each end. object-cover only ever crops the
+              shorter axis, so it could take the top and bottom off but never
+              the sides. Scaling the image past the box and clipping does both.
+              1.5 is the limit — at 1.6 the ends of the word start to go. */}
           <BrandLogo
             name="logo-bluderma"
             alt="BluDerma"
-            className="w-full h-full object-cover"
-            plateClassName="rounded-md overflow-hidden flex items-center shrink-0 w-[240px] h-8 sm:w-[380px] sm:h-10 max-w-[45vw]"
+            className="w-full h-auto scale-150"
+            plateClassName="rounded-md overflow-hidden flex items-center justify-center shrink-0 w-[200px] h-[30px] sm:w-[300px] sm:h-9 max-w-[45vw]"
           />
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {/* This mark reaches close to the edges of its own canvas — the two
