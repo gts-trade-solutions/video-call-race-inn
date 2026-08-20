@@ -185,23 +185,21 @@ export default function AppShell({
       {/* Right side: header + content */}
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="h-12 sm:h-14 shrink-0 bg-teams-purple text-white flex items-center px-3 sm:px-4 justify-between shadow z-10">
-          {/* Both marks are dark artwork on white, and the bar is near-black,
-              so each sits on its own white plate rather than disappearing. */}
-          <div className="bg-white rounded-md px-2 py-1 sm:px-3 sm:py-1.5 flex items-center min-w-0">
-            <BrandLogo
-              src="/logo-bluderma.png"
-              alt="BluDerma"
-              className="h-5 sm:h-7 w-auto object-contain"
-            />
-          </div>
+          {/* Both marks are dark artwork and the bar is near-black, so each
+              carries its own white plate — and loses it if the file is absent,
+              rather than leaving an empty white pill behind. */}
+          <BrandLogo
+            src="/logo-bluderma.png"
+            alt="BluDerma"
+            className="h-5 sm:h-7 w-auto object-contain"
+          />
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <div className="bg-white rounded-md px-2 py-1 sm:px-2.5 sm:py-1.5 hidden sm:flex items-center">
-              <BrandLogo
-                src="/logo-madenkorea.png"
-                alt="Made N Korea"
-                className="h-5 sm:h-7 w-auto object-contain"
-              />
-            </div>
+            <BrandLogo
+              src="/logo-madenkorea.png"
+              alt="Made N Korea"
+              className="h-5 sm:h-7 w-auto object-contain"
+              plateClassName="bg-white rounded-md px-2 py-1 sm:px-2.5 sm:py-1.5 hidden sm:flex items-center"
+            />
             <ThemeSwitcher />
             <span className="text-sm hidden sm:block opacity-90">
               {user.name}

@@ -27,29 +27,37 @@ export default function Logo({ className }: { className?: string }) {
 /**
  * A brand mark that simply isn't there when its file isn't there.
  *
+ * The plate is drawn here rather than by the caller, and that is the whole
+ * point: hiding only the image left its white background behind, so a missing
+ * file showed as an empty white pill in the navbar — worse than showing
+ * nothing. Now the mark and the surface it sits on disappear together.
+ *
  * The artwork is dropped into public/ rather than committed through code, so
- * between deploying this and adding the file there is a window where the src
- * 404s. Hiding on error means an empty space during that window instead of a
- * broken-image icon in the middle of the navbar.
+ * between deploying and adding the file the src legitimately 404s.
  */
 export function BrandLogo({
   src,
   alt,
   className,
+  plateClassName = "bg-white rounded-md px-2 py-1 sm:px-3 sm:py-1.5 flex items-center min-w-0",
 }: {
   src: string;
   alt: string;
   className?: string;
+  /** The surface behind the mark. Both logos are dark art on a dark bar. */
+  plateClassName?: string;
 }) {
   const [missing, setMissing] = useState(false);
   if (missing) return null;
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt={alt}
-      onError={() => setMissing(true)}
-      className={className}
-    />
+    <span className={plateClassName}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt}
+        onError={() => setMissing(true)}
+        className={className}
+      />
+    </span>
   );
 }
