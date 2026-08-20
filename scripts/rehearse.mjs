@@ -177,38 +177,27 @@ async function main() {
   console.log(`\n  1. Open this and join with your camera on:\n`);
   console.log(`     ${link}\n`);
 
-  console.log(`  2. Once you are in, run this in a second terminal:\n`);
-  console.log(`     export LIVEKIT_URL="$(grep -E '^LIVEKIT_URL=' .env.local | cut -d= -f2-)"`);
-  console.log(`     export LIVEKIT_API_KEY="$(grep -E '^LIVEKIT_API_KEY=' .env.local | cut -d= -f2-)"`);
-  console.log(`     export LIVEKIT_API_SECRET="$(grep -E '^LIVEKIT_API_SECRET=' .env.local | cut -d= -f2-)"`);
-  console.log("");
-  console.log(`     lk load-test \\`);
-  console.log(`       --room ${room} \\`);
-  console.log(`       --subscribers ${people} \\`);
-  console.log(`       --duration 5m` + "\n");
-  console.log(`     Not installed? ${installLiveKitCli()[0]}`);
-  console.log(`     Flags vary by version — check  lk load-test --help\n`);
-
-  console.log(`  3. While it runs, watch your own screen:\n`);
-  console.log(`     People panel   should climb to about ${people + 1}`);
-  console.log(`     Your video     should stay smooth — you are the one publishing`);
-  console.log(`     Latency pill   tap it; watch loss and "you're sending"`);
+  console.log(`  2. Get everyone you can onto that link — laptops, phones, tabs.\n`);
+  console.log(`     Each one is a real participant. Twenty is plenty to learn from:`);
+  console.log(`     it exercises the join path, the roster, the controls and real`);
+  console.log(`     decoding on real hardware, which is what a simulator cannot show.\n`);
+  console.log(`  3. While they join, watch your own screen:\n`);
+  console.log(`     People panel   climbs as they arrive`);
+  console.log(`     Your video     stays smooth — you are the one publishing`);
+  console.log(`     Latency pill   tap it; watch loss and "you are sending"`);
   console.log(`     The controls   open People, mute all, spotlight yourself\n`);
-
-  console.log(`  What each outcome means:\n`);
-  console.log(`     subscribers fail to connect  -> a LiveKit plan limit. Only`);
-  console.log(`                                     LiveKit can lift that, so ask`);
-  console.log(`                                     before the day.`);
-  console.log(`     all connect, video smooth    -> the media side is proven at`);
-  console.log(`                                     this size.`);
-  console.log(`     all connect, video stutters  -> bandwidth. Read the bitrate`);
-  console.log(`                                     the tester reports; that is`);
-  console.log(`                                     what the real session costs.\n`);
-
-  console.log(`  4. And the server side, in a third terminal:\n`);
+  console.log(`  Note: this cannot be simulated to a hundred. LiveKit Cloud prohibits`);
+  console.log(`  load testing, lk load-test refuses to run against it, and going`);
+  console.log(`  around that risks the project being suspended — a far worse outcome`);
+  console.log(`  two days before an event than an untested number.\n`);
+  console.log(`  So for the part only they can answer, ask LiveKit directly:\n`);
+  console.log(`     - how many concurrent participants may share one room on this plan`);
+  console.log(`     - the included bandwidth, and what happens past it\n`);
+  console.log(`     One presenter to ${people} attendees is roughly 170-300 Mbps of`);
+  console.log(`     egress, depending on the resolution each viewer is served.\n`);
+  console.log(`  4. The server side is already measurable, and passes:\n`);
   console.log(`     node scripts/capacity-check.mjs ${people}${base.origin === "http://localhost:3000" ? "" : ` --url ${base.origin}`}`);
   console.log(`     node scripts/join-burst.mjs ${people}${base.origin === "http://localhost:3000" ? "" : ` --url ${base.origin}`}\n`);
-
   console.log(`  Afterwards, cancel the rehearsal meeting from your dashboard.`);
   console.log(`${line}\n`);
 }

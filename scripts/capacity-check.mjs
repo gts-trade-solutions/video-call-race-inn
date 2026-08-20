@@ -145,28 +145,21 @@ function installLiveKitCli() {
 }
 
 function mediaHalfInstructions() {
-  const lkUrl =
-    env.LIVEKIT_URL || env.NEXT_PUBLIC_LIVEKIT_URL || "wss://YOUR.livekit.cloud";
-  const key = env.LIVEKIT_API_KEY || "<LIVEKIT_API_KEY>";
-  console.log("Now the media half. This app's server plays no part in it.\n");
-  console.log("  Install LiveKit's load tester once:");
-  for (const line of installLiveKitCli()) console.log("    " + line);
-  console.log("");
-  console.log("  Then simulate 1 presenter and " + people + " attendees:\n");
-  console.log("    lk load-test \\");
-  console.log("      --url " + lkUrl + " \\");
-  console.log("      --api-key " + key + " \\");
-  console.log("      --api-secret <LIVEKIT_API_SECRET> \\");
-  console.log("      --room capacity-probe \\");
-  console.log("      --video-publishers 1 \\");
-  console.log("      --subscribers " + people + " \\");
-  console.log("      --duration 2m\n");
-  console.log(
-    "  Flag names differ between versions — run `lk load-test --help` if one\n" +
-      "  is rejected. Two things to watch: subscribers that fail to connect\n" +
-      "  (that is a plan limit), and the total bitrate, which is what the\n" +
-      "  session costs you in bandwidth.\n"
-  );
+  console.log("Now the media half — the part this server has nothing to do with.\n");
+  console.log("  It cannot be load tested. LiveKit Cloud refuses synthetic load and");
+  console.log("  their acceptable use policy prohibits it, so `lk load-test` exits");
+  console.log("  rather than running. Working around that risks the project being");
+  console.log("  throttled or suspended, which is worse than not knowing.\n");
+  console.log("  Two things establish it instead:\n");
+  console.log("  1. Ask LiveKit what your plan allows. It is the only authoritative");
+  console.log("     answer, and they give it directly:\n");
+  console.log("       - how many concurrent participants may share one room");
+  console.log("       - the included bandwidth, and what happens past it\n");
+  console.log("     One presenter to 100 attendees is roughly 170-300 Mbps of egress,");
+  console.log("     depending on the resolution each viewer is served.\n");
+  console.log("  2. Rehearse with real devices. Ten or twenty people joining a real");
+  console.log("     meeting is ordinary use, not load testing, and it shows the thing");
+  console.log("     no simulator can: whether real hardware decodes it smoothly.\n");
 }
 
 async function main() {
