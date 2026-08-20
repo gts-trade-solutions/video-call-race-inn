@@ -78,6 +78,30 @@ function request(path, opts = {}) {
   });
 }
 
+
+/**
+ * Install instructions for whichever machine this is actually running on.
+ *
+ * These scripts get run from the deployment box as often as from a laptop, and
+ * printing "winget install" to someone on a Linux server is a dead end at the
+ * exact moment they need the tool.
+ */
+function installLiveKitCli() {
+  if (process.platform === "win32") {
+    return [
+      "winget install LiveKit.LiveKitCLI",
+      "(or: scoop install livekit-cli)",
+    ];
+  }
+  if (process.platform === "darwin") {
+    return ["brew install livekit-cli"];
+  }
+  return [
+    "curl -sSL https://get.livekit.io/cli | bash",
+    "(then check it is on your PATH: lk --version)",
+  ];
+}
+
 async function main() {
   const c = await mysql.createConnection({
     host: env.DB_HOST || env.MYSQL_HOST || "localhost",
@@ -140,7 +164,7 @@ async function main() {
   console.log(`       --room ${room} \\`);
   console.log(`       --subscribers ${people} \\`);
   console.log(`       --duration 5m\n`);
-  console.log(`     Not installed?  winget install LiveKit.LiveKitCLI`);
+  console.log(`     Not installed? ${installLiveKitCli()[0]}`);
   console.log(`     Flags vary by version — check  lk load-test --help\n`);
 
   console.log(`  3. While it runs, watch your own screen:\n`);

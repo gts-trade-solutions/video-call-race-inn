@@ -120,14 +120,38 @@ async function cleanUp() {
   }
 }
 
+
+/**
+ * Install instructions for whichever machine this is actually running on.
+ *
+ * These scripts get run from the deployment box as often as from a laptop, and
+ * printing "winget install" to someone on a Linux server is a dead end at the
+ * exact moment they need the tool.
+ */
+function installLiveKitCli() {
+  if (process.platform === "win32") {
+    return [
+      "winget install LiveKit.LiveKitCLI",
+      "(or: scoop install livekit-cli)",
+    ];
+  }
+  if (process.platform === "darwin") {
+    return ["brew install livekit-cli"];
+  }
+  return [
+    "curl -sSL https://get.livekit.io/cli | bash",
+    "(then check it is on your PATH: lk --version)",
+  ];
+}
+
 function mediaHalfInstructions() {
   const lkUrl =
     env.LIVEKIT_URL || env.NEXT_PUBLIC_LIVEKIT_URL || "wss://YOUR.livekit.cloud";
   const key = env.LIVEKIT_API_KEY || "<LIVEKIT_API_KEY>";
   console.log("Now the media half. This app's server plays no part in it.\n");
   console.log("  Install LiveKit's load tester once:");
-  console.log("    winget install LiveKit.LiveKitCLI");
-  console.log("    (or: scoop install livekit-cli)\n");
+  for (const line of installLiveKitCli()) console.log("    " + line);
+  console.log("");
   console.log("  Then simulate 1 presenter and " + people + " attendees:\n");
   console.log("    lk load-test \\");
   console.log("      --url " + lkUrl + " \\");
