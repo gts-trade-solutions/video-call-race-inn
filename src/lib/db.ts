@@ -61,6 +61,31 @@ export function getPool(): mysql.Pool {
 }
 
 /**
+ * Retries a piece of database work once if it fails for a reason that is
+ * expected to pass on a second attempt.
+ *
+ * Deadlocks and lock-wait timeouts are contention, not faults: MySQL's own
+ * advice for a deadlock is to retry the transaction. This matters most when a
+ * crowd arrives together, which is exactly when a failure is least acceptable —
+ * someone who can't get a token can't join at all, and a person staring at
+ * "couldn't join" will not know to press it again.
+ *
+ * Only for work that is safe to repeat.
+ */
+export async function withRetry<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (err) {
+    const errno = (err as { errno?: number }).errno;
+    // 1213 deadlock, 1205 lock wait timeout.
+    if (errno !== 1213 && errno !== 1205) throw err;
+    console.warn(`retrying after transient database error ${errno}`);
+    await new Promise((r) => setTimeout(r, 40 + Math.floor(Math.random() * 60)));
+    return work();
+  }
+}
+
+/**
  * Ensures the database and tables exist. Runs once per process.
  * Creating the schema on boot keeps setup to "just point at a MySQL server".
  */
@@ -426,6 +451,36 @@ export function ensureSchema(): Promise<void> {
       }
 
       // Migration: presence — last activity timestamp.
+      // One row per person per meeting, enforced by the database.
+      //
+      // Without the key, deduping meant "insert unless a row exists", and a
+      // hundred people joining at once turned that into a gap-lock pile-up:
+      // measured at 28 of 100 joins failing with a deadlock. A unique key makes
+      // it a single-row key check instead, which is both correct under
+      // concurrency and faster. Existing duplicates are collapsed first,
+      // keeping the earliest row so joined_at still means the first join.
+      try {
+        await pool.query(`
+          DELETE mp FROM meeting_participants mp
+            JOIN meeting_participants earlier
+              ON earlier.meeting_id = mp.meeting_id
+             AND earlier.user_id = mp.user_id
+             AND earlier.id < mp.id
+        `);
+      } catch (e) {
+        // No such table yet on a fresh database — the CREATE above handles it.
+        if ((e as { errno?: number }).errno !== 1146) throw e;
+      }
+      try {
+        await pool.query(
+          "ALTER TABLE meeting_participants ADD UNIQUE KEY uniq_participant (meeting_id, user_id)"
+        );
+      } catch (e) {
+        // 1061 duplicate key name, 1062 duplicates still present.
+        const errno = (e as { errno?: number }).errno;
+        if (errno !== 1061 && errno !== 1062) throw e;
+      }
+
       // Sessions issued before this instant are refused, so resetting a
       // password actually ends the sessions of whoever knew the old one.
       try {

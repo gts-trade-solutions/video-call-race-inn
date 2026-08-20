@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { AccessToken } from "livekit-server-sdk";
-import { ensureSchema, getPool } from "@/lib/db";
+import { ensureSchema, getPool, withRetry } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { getMeetingRole, identityFor } from "@/lib/meetingRoles";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
@@ -124,9 +124,25 @@ export async function GET(req: Request) {
     }
 
     // Record the join now that we're actually letting them in.
-    await pool.query<ResultSetHeader>(
-      "INSERT INTO meeting_participants (meeting_id, user_id) VALUES (:meetingId, :userId)",
-      { meetingId, userId: user.id }
+    //
+    // One row per person per meeting, not one per token request. A token is
+    // fetched on every join, every rejoin and every reconnect, so this table
+    // was growing several rows per person per meeting — and it is read back on
+    // the hot path (getMeetingRole checks it, the dashboard joins against it),
+    // so the rows a hundred people generate would slow down the very checks
+    // they run. Written as one statement so two simultaneous joins can't both
+    // pass a separate existence check and insert.
+    // A key-based upsert: the unique index on (meeting_id, user_id) makes a
+    // repeat join a no-op instead of a new row. Deliberately not the
+    // "insert where not exists" form — that range-scans and gap-locks, which
+    // deadlocked once a crowd arrived together.
+    await withRetry(() =>
+      pool.query<ResultSetHeader>(
+        `INSERT INTO meeting_participants (meeting_id, user_id)
+         VALUES (:meetingId, :userId)
+         ON DUPLICATE KEY UPDATE id = id`,
+        { meetingId, userId: user.id }
+      )
     );
 
     // Identity must be unique per participant; name is what others see.
