@@ -194,8 +194,8 @@ export default function AppShell({
           <BrandLogo
             name="logo-bluderma"
             alt="BluDerma"
-            className="w-full h-auto scale-150"
-            plateClassName="rounded-md overflow-hidden flex items-center justify-center shrink-0 w-[200px] h-[30px] sm:w-[300px] sm:h-9 max-w-[45vw]"
+            className="w-full h-auto scale-[1.35]"
+            plateClassName="rounded-md overflow-hidden flex items-center justify-center shrink-0 w-[200px] h-8 sm:w-[300px] sm:h-10 max-w-[45vw]"
           />
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {/* This mark reaches close to the edges of its own canvas — the two
