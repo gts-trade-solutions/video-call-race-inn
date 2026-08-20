@@ -3067,9 +3067,12 @@ function CallTimer() {
     const t = setInterval(() => setSecs((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, []);
-  const mm = String(Math.floor(secs / 60)).padStart(2, "0");
-  const ss = String(secs % 60).padStart(2, "0");
+  // Minutes *within the hour*, not minutes altogether. Using the total is why
+  // a two-hour meeting read 2:141:33 — and why the first second past an hour
+  // read 1:60:01.
   const hh = Math.floor(secs / 3600);
+  const mm = String(Math.floor((secs % 3600) / 60)).padStart(2, "0");
+  const ss = String(secs % 60).padStart(2, "0");
   return (
     // No status dot here: a pulsing red dot means "recording", and this is
     // just how long the meeting has been running. The REC pill next to it owns
