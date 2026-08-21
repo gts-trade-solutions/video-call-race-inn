@@ -943,8 +943,8 @@ export default function TeamsCall({
             <BrandLogo
               name="logo-bluderma"
               alt="BluDerma"
-              className="w-full h-auto scale-[1.35]"
-              plateClassName="overflow-hidden flex items-center justify-center shrink-0 w-[150px] h-7 sm:w-[210px] sm:h-9"
+              className="h-4 sm:h-5 w-auto max-w-[38vw] object-contain"
+              plateClassName="flex items-center shrink-0"
             />
             <div className="leading-tight min-w-0">
               <div className="text-sm font-semibold leading-tight truncate">

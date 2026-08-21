@@ -186,14 +186,13 @@ export default function AppShell({
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="h-12 sm:h-14 shrink-0 bg-teams-purple text-white flex items-center px-3 sm:px-4 justify-between shadow z-10">
           {/* Light versions of both marks, so they sit straight on the dark bar
-              with no plate behind them. BluDerma still carries white space above
-              and below in its file, so it is scaled a little past its box and
-              clipped; the Korea mark fills its own canvas and needs none. */}
+              with no plate behind them. Both files are trimmed to the artwork
+              itself, so each is sized by height and never clipped. */}
           <BrandLogo
             name="logo-bluderma"
             alt="BluDerma"
-            className="w-full h-auto scale-[1.35]"
-            plateClassName="overflow-hidden flex items-center justify-center shrink-0 w-[190px] h-8 sm:w-[280px] sm:h-10 max-w-[45vw]"
+            className="h-[18px] sm:h-6 w-auto max-w-[46vw] object-contain"
+            plateClassName="flex items-center shrink-0"
           />
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <BrandLogo
