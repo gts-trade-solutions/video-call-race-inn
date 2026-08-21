@@ -450,7 +450,6 @@ export function ensureSchema(): Promise<void> {
         if ((e as { errno?: number }).errno !== 1061) throw e;
       }
 
-      // Migration: presence — last activity timestamp.
       // Why a recording failed. Egress reports a reason — a rejected S3 key,
       // a bucket that doesn't exist — and without somewhere to put it the
       // dashboard could only say "Failed", which is the least useful half of
@@ -503,6 +502,7 @@ export function ensureSchema(): Promise<void> {
         if ((e as { errno?: number }).errno !== 1060) throw e;
       }
 
+      // Migration: presence — last activity timestamp.
       try {
         await pool.query(
           "ALTER TABLE users ADD COLUMN last_seen TIMESTAMP NULL DEFAULT NULL"
