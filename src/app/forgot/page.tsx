@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { PasswordField } from "@/components/AuthForm";
-import Logo from "@/components/Logo";
+import { BrandLogo } from "@/components/Logo";
 
 export default function ForgotPage() {
   const router = useRouter();
@@ -84,7 +84,15 @@ export default function ForgotPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#e8e8f8] via-[#f5f5f5] to-[#e3e3f6] px-4 py-8">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-6 sm:p-8 border border-teams-line">
-        <Logo className="h-14 sm:h-16 w-auto object-contain mb-4" />
+        {/* The dark wordmark, not the one in the navbar: these cards are
+            white, and the light mark's "BLU" is white too — it would read as
+            just "DERMA". */}
+        <BrandLogo
+          name="logo-bluderma-dark"
+          alt="BluDerma"
+          className="w-48 sm:w-56 h-auto object-contain"
+          plateClassName="flex items-center mb-5"
+        />
         <h1 className="text-xl font-semibold text-teams-dark">
           Reset your password
         </h1>

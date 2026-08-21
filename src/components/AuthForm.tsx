@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import Logo from "@/components/Logo";
+import { BrandLogo } from "@/components/Logo";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -96,7 +96,15 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#e8e8f8] via-[#f5f5f5] to-[#e3e3f6] px-4 py-8">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-6 sm:p-8 border border-teams-line">
         <div className="mb-6">
-          <Logo className="h-14 sm:h-16 w-auto object-contain mb-4" />
+          {/* The dark wordmark, not the one in the navbar: these cards are
+              white, and the light mark's "BLU" is white too — it would read as
+              just "DERMA". */}
+          <BrandLogo
+            name="logo-bluderma-dark"
+            alt="BluDerma"
+            className="w-48 sm:w-56 h-auto object-contain"
+            plateClassName="flex items-center mb-5"
+          />
           <h1 className="text-xl font-semibold text-teams-dark leading-tight">
             {isRegister ? "Create your account" : "Welcome back"}
           </h1>

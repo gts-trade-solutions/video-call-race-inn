@@ -3,28 +3,6 @@
 import { useState } from "react";
 
 /**
- * The Race Innovations logo, used in the app header, the call header and the
- * sign-in screens.
- *
- * To change the logo, drop the artwork in `public/` as **logo.png** (or
- * replace `public/logo.svg` if you have the vector). This component prefers
- * logo.png and falls back to logo.svg, so adding the file is all it takes —
- * no code change, and nothing breaks while the file isn't there.
- */
-export default function Logo({ className }: { className?: string }) {
-  const [src, setSrc] = useState("/logo.png");
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt="Race Innovations"
-      onError={() => setSrc("/logo.svg")}
-      className={className}
-    />
-  );
-}
-
-/**
  * A brand mark that tries a few filenames, and isn't there when none of them
  * are.
  *
@@ -53,10 +31,10 @@ export function BrandLogo({
   /** Optional surface behind the mark, for a bar it would disappear into. */
   plateClassName?: string;
 }) {
-  // .jpg first because that is what ships in public/ today. The others stay as
+  // .png first because that is what ships in public/ today. The others stay as
   // a fallback so swapping the artwork later needs no code change, but the
   // shipped format should never cost a 404 on the way to being found.
-  const candidates = [`/${name}.jpg`, `/${name}.png`, `/${name}.svg`];
+  const candidates = [`/${name}.png`, `/${name}.jpg`, `/${name}.svg`];
   const [attempt, setAttempt] = useState(0);
   if (attempt >= candidates.length) return null;
   return (
