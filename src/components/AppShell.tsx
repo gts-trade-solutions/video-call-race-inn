@@ -185,29 +185,22 @@ export default function AppShell({
       {/* Right side: header + content */}
       <div className="flex-1 min-w-0 flex flex-col">
         <header className="h-12 sm:h-14 shrink-0 bg-teams-purple text-white flex items-center px-3 sm:px-4 justify-between shadow z-10">
-          {/* The wordmark sits in the middle of its file with wide white
-              margins all round: a band about a fifth of the height, and 19% of
-              the width empty at each end. object-cover only ever crops the
-              shorter axis, so it could take the top and bottom off but never
-              the sides. Scaling the image past the box and clipping does both.
-              1.5 is the limit — at 1.6 the ends of the word start to go. */}
+          {/* Light versions of both marks, so they sit straight on the dark bar
+              with no plate behind them. BluDerma still carries white space above
+              and below in its file, so it is scaled a little past its box and
+              clipped; the Korea mark fills its own canvas and needs none. */}
           <BrandLogo
             name="logo-bluderma"
             alt="BluDerma"
             className="w-full h-auto scale-[1.35]"
-            plateClassName="rounded-md overflow-hidden flex items-center justify-center shrink-0 w-[200px] h-8 sm:w-[300px] sm:h-10 max-w-[45vw]"
+            plateClassName="overflow-hidden flex items-center justify-center shrink-0 w-[190px] h-8 sm:w-[280px] sm:h-10 max-w-[45vw]"
           />
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            {/* This mark reaches close to the edges of its own canvas — the two
-                arcs almost touch the top and bottom — so rounding the container
-                was cutting their ends off. The white padding gives the corners
-                something to clip that isn't artwork, and matches the white
-                already baked into the file, so the join is invisible. */}
             <BrandLogo
               name="logo-madenkorea"
               alt="Made N Korea"
-              className="h-10 w-auto object-contain"
-              plateClassName="hidden sm:flex items-center rounded-md shrink-0 bg-white px-1.5 py-1"
+              className="h-9 sm:h-11 w-auto object-contain"
+              plateClassName="hidden sm:flex items-center shrink-0"
             />
             <ThemeSwitcher />
             <span className="text-sm hidden sm:block opacity-90">

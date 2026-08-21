@@ -29,6 +29,7 @@ type RecRow = RowDataPacket & {
   s3_bucket: string | null;
   s3_region: string | null;
   s3_key: string | null;
+  error_text?: string | null;
   duration_secs: number | null;
   size_bytes: number | null;
   started_at: string;
@@ -58,6 +59,7 @@ export async function GET(req: Request) {
   const [rows] = await pool.query<RecRow[]>(
     `SELECT r.id, r.room_id, r.egress_id, r.status, r.s3_bucket, r.s3_region,
             r.s3_key, r.duration_secs, r.size_bytes, r.started_at, r.ended_at,
+            r.error_text,
             u.name AS started_by_name, m.title AS meeting_title
        FROM recordings r
        LEFT JOIN users u ON u.id = r.started_by
@@ -95,6 +97,9 @@ export async function GET(req: Request) {
             const file = info.fileResults?.[0];
             r.status =
               info.status === EGRESS_COMPLETE ? "completed" : "failed";
+            // Egress reports why it failed. Keeping it turns a bare "Failed"
+            // into something the person reading it can act on.
+            r.error_text = info.error ? String(info.error).slice(0, 500) : null;
             r.s3_key = file?.filename || r.s3_key;
             r.size_bytes = file?.size != null ? Number(file.size) : r.size_bytes;
             r.duration_secs =
@@ -104,6 +109,7 @@ export async function GET(req: Request) {
             await pool.query(
               `UPDATE recordings SET status = :status, s3_key = :key,
                  size_bytes = :size, duration_secs = :duration,
+                 error_text = :error,
                  ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP)
                WHERE id = :id`,
               {
@@ -111,6 +117,7 @@ export async function GET(req: Request) {
                 key: r.s3_key,
                 size: r.size_bytes,
                 duration: r.duration_secs,
+                error: r.error_text ?? null,
                 id: r.id,
               }
             );
@@ -146,6 +153,7 @@ export async function GET(req: Request) {
         id: r.id,
         roomId: r.room_id,
         title: r.meeting_title,
+        error: r.error_text ?? null,
         status: r.status,
         startedBy: r.started_by_name,
         startedAt: r.started_at,

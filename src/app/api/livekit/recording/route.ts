@@ -8,6 +8,7 @@ import {
   buildFileOutput,
   egressClient,
   getRecordingConfig,
+  verifyS3Writable,
 } from "@/lib/recording";
 
 export const runtime = "nodejs";
@@ -139,6 +140,12 @@ export async function POST(req: Request) {
           alreadyRecording: true,
           egressId: existing[0].egress_id,
         });
+      }
+
+      // Fail here, loudly, rather than an hour later with nothing saved.
+      const s3Problem = await verifyS3Writable(cfg.config.s3);
+      if (s3Problem) {
+        return NextResponse.json({ error: s3Problem }, { status: 500 });
       }
 
       const { output, keyTemplate } = buildFileOutput(room, cfg.config.s3);

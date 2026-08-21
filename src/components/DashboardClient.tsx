@@ -27,6 +27,8 @@ type Recording = {
   durationSecs: number | null;
   sizeBytes: number | null;
   downloadUrl: string | null;
+  /** Why it failed, when it did. Egress knows; this carries it through. */
+  error: string | null;
 };
 
 export default function DashboardClient({ user }: { user: SessionUser }) {
@@ -366,6 +368,16 @@ export default function DashboardClient({ user }: { user: SessionUser }) {
                     </td>
                     <td className="px-4 py-3">
                       <RecordingStatus status={r.status} />
+                      {/* A bare "Failed" tells nobody what to fix. Egress
+                          says why — usually storage credentials. */}
+                      {r.status === "failed" && r.error ? (
+                        <div
+                          className="mt-1 text-[11px] text-red-600 max-w-[220px] break-words"
+                          title={r.error}
+                        >
+                          {r.error}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-right">
                       {r.status === "completed" && r.downloadUrl ? (

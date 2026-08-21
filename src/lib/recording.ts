@@ -137,3 +137,61 @@ export function buildFileOutput(
   });
   return { output, keyTemplate };
 }
+
+/**
+ * Egress uploads straight from LiveKit to S3, so a bad key isn't discovered
+ * until the recording is already over and the video is gone. This does the same
+ * write the egress will do, before the host is told "Recording", and reports
+ * the reason in words rather than leaving a "Failed" row behind.
+ *
+ * Cached briefly: starts are rare, but a room full of retrying clients
+ * shouldn't turn into a burst of S3 calls.
+ */
+let s3Check: { at: number; error: string | null } | null = null;
+const S3_CHECK_TTL_MS = 60_000;
+
+export async function verifyS3Writable(s3: S3Config): Promise<string | null> {
+  if (s3Check && Date.now() - s3Check.at < S3_CHECK_TTL_MS) {
+    return s3Check.error;
+  }
+  const { S3Client, PutObjectCommand, DeleteObjectCommand } = await import(
+    "@aws-sdk/client-s3"
+  );
+  const client = new S3Client({
+    region: s3.region,
+    endpoint: s3.endpoint,
+    forcePathStyle: s3.forcePathStyle ?? false,
+    credentials: { accessKeyId: s3.accessKey, secretAccessKey: s3.secret },
+  });
+  const key = "recordings/.preflight";
+  let error: string | null = null;
+  try {
+    await client.send(
+      new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: "ok" })
+    );
+    // Tidy up, but a bucket that blocks deletes still records fine.
+    client
+      .send(new DeleteObjectCommand({ Bucket: s3.bucket, Key: key }))
+      .catch(() => {});
+  } catch (err) {
+    const name = (err as { name?: string })?.name || "";
+    const msg = (err as { message?: string })?.message || String(err);
+    if (name === "InvalidAccessKeyId") {
+      error = `S3 rejected the access key (${s3.accessKey.slice(
+        0,
+        6
+      )}…). Check AWS_S3_ACCESS_KEY_ID in .env.local — the key does not exist, or was deleted.`;
+    } else if (name === "SignatureDoesNotMatch") {
+      error =
+        "S3 rejected the signature. AWS_S3_SECRET_ACCESS_KEY does not match the access key id.";
+    } else if (name === "NoSuchBucket") {
+      error = `Bucket "${s3.bucket}" does not exist in ${s3.region}. Check AWS_S3_BUCKET_NAME and AWS_S3_REGION.`;
+    } else if (name === "AccessDenied") {
+      error = `The key cannot write to "${s3.bucket}". It needs s3:PutObject on recordings/*.`;
+    } else {
+      error = `S3 is not reachable: ${msg}`;
+    }
+  }
+  s3Check = { at: Date.now(), error };
+  return error;
+}

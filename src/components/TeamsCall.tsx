@@ -31,7 +31,7 @@ import {
   type Participant,
   type LocalVideoTrack,
 } from "livekit-client";
-import Logo from "@/components/Logo";
+import { BrandLogo } from "@/components/Logo";
 import { Toasts, useToasts } from "@/components/call/Toasts";
 import { CaptionOverlay, NotesPanel } from "@/components/call/CaptionsUI";
 import { NOTE_TAKER_ENABLED } from "@/lib/features";
@@ -937,9 +937,15 @@ export default function TeamsCall({
           }`}
         >
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="bg-white rounded px-1.5 py-1 flex items-center shrink-0">
-              <Logo className="h-5 sm:h-7 w-auto object-contain" />
-            </div>
+            {/* The call header is dark too, so the light marks sit on it
+                directly. BluDerma is the primary one here; the Korea mark rides
+                on the right of the header beside the call controls. */}
+            <BrandLogo
+              name="logo-bluderma"
+              alt="BluDerma"
+              className="w-full h-auto scale-[1.35]"
+              plateClassName="overflow-hidden flex items-center justify-center shrink-0 w-[150px] h-7 sm:w-[210px] sm:h-9"
+            />
             <div className="leading-tight min-w-0">
               <div className="text-sm font-semibold leading-tight truncate">
                 {title || "Meeting"}
@@ -967,6 +973,12 @@ export default function TeamsCall({
                 <span className="hidden sm:inline">Weak connection</span>
               </span>
             )}
+            <BrandLogo
+              name="logo-madenkorea"
+              alt="Made N Korea"
+              className="h-7 w-auto object-contain"
+              plateClassName="hidden md:flex items-center shrink-0 mr-1"
+            />
             <LatencyPill stats={connStats} cap={net.capLabel} />
             <CallTimer />
             <button
@@ -2568,8 +2580,13 @@ function PeoplePanel({
             a headcount rather than a list nobody scrolls through. */}
         {roles.mode === "webinar" && (
           <div className="flex items-center justify-between px-2 pb-1 text-[11px] uppercase tracking-wide text-gray-400">
+            {/* Both halves count people who are actually here. The presenting
+                figure used to come from the database instead — everyone
+                *entitled* to publish, present or not — so an absent co-host was
+                counted as presenting and the two numbers didn't add up to the
+                headcount in the title. */}
             <span>
-              {roles.publisherIdentities.length} presenting ·{" "}
+              {presenterCount} presenting ·{" "}
               {Math.max(0, participants.length - presenterCount)} listening
             </span>
           </div>

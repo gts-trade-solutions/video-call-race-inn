@@ -451,6 +451,18 @@ export function ensureSchema(): Promise<void> {
       }
 
       // Migration: presence — last activity timestamp.
+      // Why a recording failed. Egress reports a reason — a rejected S3 key,
+      // a bucket that doesn't exist — and without somewhere to put it the
+      // dashboard could only say "Failed", which is the least useful half of
+      // what the server already knew.
+      try {
+        await pool.query(
+          "ALTER TABLE recordings ADD COLUMN error_text VARCHAR(500) NULL DEFAULT NULL"
+        );
+      } catch (e) {
+        if ((e as { errno?: number }).errno !== 1060) throw e;
+      }
+
       // One row per person per meeting, enforced by the database.
       //
       // Without the key, deduping meant "insert unless a row exists", and a
