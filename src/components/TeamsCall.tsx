@@ -26,6 +26,8 @@ import {
   type TrackReferenceOrPlaceholder,
 } from "@livekit/components-react";
 import {
+  MediaDeviceFailure,
+  RoomEvent,
   ScreenSharePresets,
   Track,
   type Participant,
@@ -163,6 +165,43 @@ export default function TeamsCall({
 
   // ----- Roles, notifications, hands and screen-share control -----
   const { toasts, push: notify } = useToasts();
+
+  // When getUserMedia fails, the camera/mic button just doesn't light up —
+  // and someone whose browser has silently blocked the camera reads that as
+  // "the camera is not accessible" with no idea it's their browser saying no.
+  // Turn the refusal into words that name the actual fix.
+  useEffect(() => {
+    if (!lkRoom) return;
+    const onDeviceError = (error: Error) => {
+      const lp = lkRoom.localParticipant;
+      const device =
+        lp.lastCameraError === error
+          ? "camera"
+          : lp.lastMicrophoneError === error
+          ? "microphone"
+          : "camera or microphone";
+      const failure = MediaDeviceFailure.getFailure(error);
+      if (failure === MediaDeviceFailure.PermissionDenied) {
+        notify(
+          `Your browser is blocking the ${device}. Click the camera icon in the address bar (or check Settings → Site permissions), allow it, then try again.`,
+          10_000
+        );
+      } else if (failure === MediaDeviceFailure.DeviceInUse) {
+        notify(
+          `Another app is using the ${device} (Zoom, Teams, OBS…). Close it and try again.`,
+          10_000
+        );
+      } else if (failure === MediaDeviceFailure.NotFound) {
+        notify(`No ${device} was found on this device.`);
+      } else {
+        notify(`Could not start the ${device}: ${error.message}`);
+      }
+    };
+    lkRoom.on(RoomEvent.MediaDevicesError, onDeviceError);
+    return () => {
+      lkRoom.off(RoomEvent.MediaDevicesError, onDeviceError);
+    };
+  }, [lkRoom, notify]);
   // Backs the received video quality off when the link can't keep up, so a
   // struggling connection means softer video instead of video that stalls.
   // Latency and the rest of the connection numbers, shown in the header.

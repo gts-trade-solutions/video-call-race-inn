@@ -14,13 +14,15 @@ export function useToasts(timeoutMs = 4000) {
   const seq = useRef(0);
 
   const push = useCallback(
-    (text: string) => {
+    // `ms` for the rare notice that asks the reader to go do something —
+    // "allow the camera in site permissions" can't be acted on in four seconds.
+    (text: string, ms?: number) => {
       const id = ++seq.current;
       // Cap the stack so a burst of raised hands can't cover the stage.
       setToasts((t) => [...t.slice(-2), { id, text }]);
       setTimeout(
         () => setToasts((t) => t.filter((x) => x.id !== id)),
-        timeoutMs
+        ms ?? timeoutMs
       );
     },
     [timeoutMs]
