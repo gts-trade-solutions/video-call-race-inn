@@ -24,6 +24,7 @@ export const dynamic = "force-dynamic";
 
 type Action =
   | "endMeeting"
+  | "transferHost"
   | "mute"
   | "muteAll"
   | "stopVideo"
@@ -35,6 +36,7 @@ type Action =
 
 const ACTIONS: Action[] = [
   "endMeeting",
+  "transferHost",
   "mute",
   "muteAll",
   "stopVideo",
@@ -159,6 +161,53 @@ export async function POST(req: Request) {
       );
     }
     // The cached role facts for this room now name the wrong co-hosts.
+    invalidateMeetingRole(room);
+    return NextResponse.json({ ok: true });
+  }
+
+  // ----- Transfer the meeting to a new host (owner only) -----
+  // The host is a database fact (meetings.host_id), so handing it over
+  // survives reloads and reaches every future join. The old host keeps
+  // co-host powers rather than dropping to a plain participant — handing
+  // over the meeting shouldn't read as being thrown out of running it.
+  if (action === "transferHost") {
+    if (!role.isOwner) {
+      return NextResponse.json(
+        { error: "Only the meeting host can transfer the host role." },
+        { status: 403 }
+      );
+    }
+    const targetId = userIdFromIdentity(identity!);
+    if (!targetId) {
+      // Guests aren't accounts, and the host must be one — host_id is a
+      // foreign key into users.
+      return NextResponse.json(
+        { error: "Only a signed-in participant can become the host." },
+        { status: 400 }
+      );
+    }
+    if (targetId === role.ownerId) {
+      return NextResponse.json(
+        { error: "They are already the host." },
+        { status: 400 }
+      );
+    }
+    const pool = getPool();
+    await pool.query<ResultSetHeader>(
+      "UPDATE meetings SET host_id = :target WHERE id = :meetingId",
+      { target: targetId, meetingId: role.meetingId }
+    );
+    // The new host outranks the co-host list; a row there would be noise.
+    await pool.query<ResultSetHeader>(
+      "DELETE FROM meeting_cohosts WHERE meeting_id = :meetingId AND user_id = :target",
+      { meetingId: role.meetingId, target: targetId }
+    );
+    await pool.query<ResultSetHeader>(
+      `INSERT INTO meeting_cohosts (meeting_id, user_id, granted_by)
+       VALUES (:meetingId, :userId, :by)
+       ON DUPLICATE KEY UPDATE granted_by = :by`,
+      { meetingId: role.meetingId, userId: user.id, by: targetId }
+    );
     invalidateMeetingRole(room);
     return NextResponse.json({ ok: true });
   }

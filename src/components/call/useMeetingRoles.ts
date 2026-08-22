@@ -14,6 +14,7 @@ import { safeSend, type Sender } from "./channel";
  */
 
 export type ParticipantAction =
+  | "transferHost"
   | "mute"
   | "muteAll"
   | "stopVideo"
@@ -145,6 +146,7 @@ export function useMeetingRoles(
           return { error: (d.error as string) || "That didn't work." };
         }
         if (
+          action === "transferHost" ||
           action === "promote" ||
           action === "demote" ||
           action === "allowSpeak" ||

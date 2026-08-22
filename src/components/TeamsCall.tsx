@@ -2887,6 +2887,31 @@ function PeoplePanel({
                         {isCoHostRow ? "Remove co-host" : "Make co-host"}
                       </MenuItem>
                     )}
+                    {/* Handing the meeting over outright. Guests can't take
+                        it (the host is a database fact tied to an account),
+                        and it's confirmed because it moves the End button:
+                        the old host keeps co-host powers, not ownership. */}
+                    {roles.isOwner &&
+                      !p.isLocal &&
+                      !isOwnerRow &&
+                      p.identity.startsWith("user-") && (
+                        <MenuItem
+                          onClick={() => {
+                            const name = p.name || p.identity;
+                            if (
+                              !window.confirm(
+                                `Make ${name} the host? They take over the meeting (including ending it for everyone); you stay on as co-host.`
+                              )
+                            ) {
+                              setMenuFor(null);
+                              return;
+                            }
+                            run("transferHost", p.identity);
+                          }}
+                        >
+                          Make host
+                        </MenuItem>
+                      )}
                     {canActOn && !isOwnerRow && (
                       <MenuItem
                         danger
