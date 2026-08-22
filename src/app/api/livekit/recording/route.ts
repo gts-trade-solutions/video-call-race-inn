@@ -201,6 +201,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, stopped: rows.length });
   } catch (err) {
     console.error("recording error:", err);
+    // LiveKit's quota refusal deserves its own words: "check configuration"
+    // sends someone hunting through env vars when the plan is simply spent.
+    const e = err as { status?: number; code?: string };
+    if (e?.status === 429 || e?.code === "resource_exhausted") {
+      return NextResponse.json(
+        {
+          error:
+            "The LiveKit plan is out of recording minutes. Upgrade the plan at cloud.livekit.io (Build → Ship) to record again.",
+        },
+        { status: 429 }
+      );
+    }
     return NextResponse.json(
       { error: "Recording request failed. Check egress/S3 configuration." },
       { status: 500 }
