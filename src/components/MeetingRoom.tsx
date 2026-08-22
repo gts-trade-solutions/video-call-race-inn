@@ -9,6 +9,7 @@ import {
 } from "@livekit/components-react";
 import { DisconnectReason, RoomOptions, VideoPresets } from "livekit-client";
 import TeamsCall from "@/components/TeamsCall";
+import { BrandLogo } from "@/components/Logo";
 import { loadStoredEffect } from "@/components/call/useVideoEffects";
 
 type Phase =
@@ -381,9 +382,23 @@ export default function MeetingRoom({
       // button disappeared on a short window. A scroll container with a
       // min-h-full child centres the card when it fits and scrolls when it
       // doesn't, so the button is always reachable.
-      <div className="h-full overflow-y-auto bg-gradient-to-br from-[#1f1f1f] to-[#2d2c2c]">
+      //
+      // data-lk-theme is load-bearing: every lk CSS variable lives under that
+      // attribute, and without it the Join button's colours resolve to
+      // nothing — a transparent button, which is the other way it managed to
+      // be invisible. The prejoin-specific look is in globals.css.
+      <div
+        data-lk-theme="default"
+        className="h-full overflow-y-auto bg-gradient-to-br from-[#17171a] via-[#1f1f24] to-[#26262c]"
+      >
         <div className="min-h-full flex flex-col items-center justify-center px-4 py-8">
-        <div className="mb-5 text-center">
+        <div className="mb-6 text-center flex flex-col items-center">
+          <BrandLogo
+            name="logo-bluderma"
+            alt="BluDerma"
+            className="h-5 sm:h-6 w-auto max-w-[70vw] object-contain"
+            plateClassName="flex items-center mb-4"
+          />
           <h1 className="text-white text-2xl font-semibold">Ready to join?</h1>
           <p className="text-gray-400 text-sm mt-1">
             Meeting ID: <span className="font-mono">{room}</span>
@@ -404,7 +419,7 @@ export default function MeetingRoom({
             {copied ? "Link copied!" : "Copy invite link"}
           </button>
         </div>
-        <div className="bg-white rounded-2xl overflow-hidden shadow-2xl w-full max-w-lg">
+        <div className="rounded-2xl overflow-hidden shadow-2xl w-full max-w-lg border border-white/10 bg-[#232327]">
           <PreJoin
             defaults={preJoinDefaults}
             onSubmit={handlePreJoinSubmit}
