@@ -320,6 +320,11 @@ export default function MeetingRoom({
 
   // Denied guest asks to join again — reset our request to "waiting" so the
   // host is re-notified, then go back to the waiting screen.
+  // Distinguishes the host ending the meeting from my own Leave: the "left"
+  // screen offers Rejoin, which makes no sense for a room that no longer
+  // exists.
+  const [endedByHost, setEndedByHost] = useState(false);
+
   const askAgain = useCallback(async () => {
     setPhase("connecting");
     setError(null);
@@ -504,15 +509,22 @@ export default function MeetingRoom({
   if (phase === "left") {
     return (
       <CenteredCard
-        title="You left the meeting"
-        body="Thanks for joining."
+        title={endedByHost ? "The meeting has ended" : "You left the meeting"}
+        body={
+          endedByHost
+            ? "The host ended the meeting for everyone."
+            : "Thanks for joining."
+        }
         actions={
           <>
-            {/* Straight back in with the devices already chosen. */}
-            <PrimaryBtn onClick={connect}>Rejoin</PrimaryBtn>
-            <SecondaryBtn onClick={() => setPhase("prejoin")}>
-              Change devices
-            </SecondaryBtn>
+            {/* Straight back in with the devices already chosen — unless the
+                host ended the room, in which case there is nothing to rejoin. */}
+            {!endedByHost && <PrimaryBtn onClick={connect}>Rejoin</PrimaryBtn>}
+            {!endedByHost && (
+              <SecondaryBtn onClick={() => setPhase("prejoin")}>
+                Change devices
+              </SecondaryBtn>
+            )}
             <SecondaryBtn onClick={() => router.push("/dashboard")}>
               Dashboard
             </SecondaryBtn>
@@ -551,6 +563,7 @@ export default function MeetingRoom({
               reason === DisconnectReason.SIGNAL_CLOSE ||
               reason === DisconnectReason.JOIN_FAILURE);
           if (!dropped) {
+            if (reason === DisconnectReason.ROOM_DELETED) setEndedByHost(true);
             // Stamp the talk time in the call log. Fire-and-forget: the server
             // ignores it unless this room really was a 1:1 call I was part of,
             // and the first hang-up is the one that counts.

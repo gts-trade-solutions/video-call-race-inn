@@ -19,7 +19,6 @@ import {
   useIsSpeaking,
   VideoTrack,
   TrackToggle,
-  DisconnectButton,
   RoomAudioRenderer,
   ConnectionStateToast,
   type TrackReference,
@@ -444,6 +443,30 @@ export default function TeamsCall({
   const { send: sendRecPing } = useDataChannel("recording", () => {
     refreshRecording();
   });
+
+  /**
+   * Leaving, Teams-style: a participant's Leave takes only them out, the
+   * host's Leave ends the meeting — the server deletes the room and everyone
+   * is disconnected with ROOM_DELETED, which their screens report as "the
+   * meeting has ended" rather than leaving them sitting in an abandoned room.
+   *
+   * Deliberate leaves only: a host whose network drops reconnects like anyone
+   * else, so a hiccup can't take a hundred people down with it.
+   */
+  const leaveCall = useCallback(async () => {
+    if (roles.isOwner) {
+      try {
+        await fetch("/api/livekit/participants", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ room, action: "endMeeting" }),
+        });
+      } catch {
+        /* end what we can — my own leave below still works */
+      }
+    }
+    lkRoom.disconnect().catch(() => {});
+  }, [roles.isOwner, room, lkRoom]);
 
   const toggleRecording = useCallback(async () => {
     if (recBusy) return;
@@ -1321,16 +1344,15 @@ export default function TeamsCall({
               <span className="ctrl-label">People ({participants.length})</span>
             </button>
 
-            {/* `!` overrides LiveKit's .lk-disconnect-button styles, which
-                otherwise render this as a red-outlined transparent button. */}
-            <DisconnectButton
-              aria-label="Leave meeting"
-              title="Leave meeting"
-              className="flex flex-col items-center justify-center gap-0.5 h-11 w-11 rounded-full sm:h-auto sm:w-auto sm:rounded-xl sm:px-4 sm:py-2 !bg-red-600 hover:!bg-red-700 !text-white !border-0 text-[11px] font-medium transition ml-1"
+            <button
+              onClick={leaveCall}
+              aria-label={roles.isOwner ? "End meeting for everyone" : "Leave meeting"}
+              title={roles.isOwner ? "End meeting for everyone" : "Leave meeting"}
+              className="flex flex-col items-center justify-center gap-0.5 h-11 w-11 rounded-full sm:h-auto sm:w-auto sm:rounded-xl sm:px-4 sm:py-2 bg-red-600 hover:bg-red-700 text-white text-[11px] font-medium transition ml-1"
             >
               <LeaveIcon />
-              <span className="ctrl-label">Leave</span>
-            </DisconnectButton>
+              <span className="ctrl-label">{roles.isOwner ? "End" : "Leave"}</span>
+            </button>
           </div>
         </footer>
           </div>
@@ -1395,6 +1417,8 @@ export default function TeamsCall({
               onFlipCamera={hasTwoCameras ? flipCamera : undefined}
               onOpenPanel={(p) => setPanel(panel === p ? "none" : p)}
               onReact={sendReaction}
+              onLeave={leaveCall}
+              isOwner={roles.isOwner}
               unread={unread}
               participants={participants.length}
             />
@@ -1424,6 +1448,8 @@ function ControlRail({
   onFlipCamera,
   onOpenPanel,
   onReact,
+  onLeave,
+  isOwner,
   unread,
   participants,
 }: {
@@ -1440,6 +1466,8 @@ function ControlRail({
   onFlipCamera?: () => void;
   onOpenPanel: (p: Exclude<Panel, "none">) => void;
   onReact: (emoji: string) => void;
+  onLeave: () => void;
+  isOwner: boolean;
   unread: number;
   participants: number;
 }) {
@@ -1487,12 +1515,13 @@ function ControlRail({
           <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500" />
         )}
       </button>
-      <DisconnectButton
-        aria-label="Leave meeting"
-        className="w-11 h-11 rounded-full flex items-center justify-center !bg-red-600 hover:!bg-red-700 !text-white !border-0"
+      <button
+        onClick={onLeave}
+        aria-label={isOwner ? "End meeting for everyone" : "Leave meeting"}
+        className="w-11 h-11 rounded-full flex items-center justify-center bg-red-600 hover:bg-red-700 text-white"
       >
         <LeaveIcon />
-      </DisconnectButton>
+      </button>
 
       {moreOpen && (
         <>

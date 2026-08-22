@@ -23,6 +23,7 @@ export const dynamic = "force-dynamic";
  */
 
 type Action =
+  | "endMeeting"
   | "mute"
   | "muteAll"
   | "stopVideo"
@@ -33,6 +34,7 @@ type Action =
   | "revokeSpeak";
 
 const ACTIONS: Action[] = [
+  "endMeeting",
   "mute",
   "muteAll",
   "stopVideo",
@@ -105,7 +107,7 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
-  if (action !== "muteAll" && !identity) {
+  if (action !== "muteAll" && action !== "endMeeting" && !identity) {
     return NextResponse.json(
       { error: "identity is required for this action" },
       { status: 400 }
@@ -167,6 +169,25 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: svc.error }, { status: 500 });
   }
   const client = svc.client;
+
+  // ----- End the meeting for everyone (the host's Leave) -----
+  // Deleting the room disconnects every participant with ROOM_DELETED, which
+  // each client shows as "the meeting has ended". Owner only: a co-host must
+  // be able to leave early without taking the room down with them.
+  if (action === "endMeeting") {
+    if (!role.isOwner) {
+      return NextResponse.json(
+        { error: "Only the meeting host can end the meeting." },
+        { status: 403 }
+      );
+    }
+    try {
+      await client.deleteRoom(room);
+    } catch {
+      // The room may already be gone (last person left). That's still ended.
+    }
+    return NextResponse.json({ ok: true });
+  }
 
   // ----- Webinar: let an attendee speak, or move them back to listening -----
   if (action === "allowSpeak" || action === "revokeSpeak") {
