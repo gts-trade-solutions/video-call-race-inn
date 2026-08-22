@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDataChannel } from "@livekit/components-react";
-import { safeSend, type Sender } from "./channel";
+import { safeSend, type Sender, useTopicSender } from "./channel";
 
 /**
  * Who runs this meeting, kept live.
@@ -121,10 +121,10 @@ export function useMeetingRoles(
     }
   }, [room]);
 
-  const { send } = useDataChannel("roles", () => {
+  useDataChannel("roles", () => {
     refresh();
   });
-  sendRef.current = send;
+  sendRef.current = useTopicSender("roles");
 
   useEffect(() => {
     refresh();

@@ -41,7 +41,7 @@ import EffectsPanel from "@/components/call/EffectsPanel";
 import { useVideoEffects } from "@/components/call/useVideoEffects";
 import { useRaiseHand, type UseRaiseHand } from "@/components/call/useRaiseHand";
 import { useNetworkGuard } from "@/components/call/useNetworkGuard";
-import { RELIABLE } from "@/components/call/channel";
+import { RELIABLE, sendWithRetry, useTopicSender } from "@/components/call/channel";
 import { closeChimes, playHandChime } from "@/components/call/chime";
 import {
   useConnectionStats,
@@ -368,7 +368,8 @@ export default function TeamsCall({
 
   // In-call chat over a reliable data channel (same mechanism as reactions).
   const [chatMsgs, setChatMsgs] = useState<CallChatMsg[]>([]);
-  const { send: sendChatData } = useDataChannel("chat", (msg) => {
+  const sendChatData = useTopicSender("chat");
+  useDataChannel("chat", (msg) => {
     try {
       const d = JSON.parse(new TextDecoder().decode(msg.payload));
       // Attribute the message to the authenticated sender from LiveKit, never
@@ -395,14 +396,13 @@ export default function TeamsCall({
       const sender =
         localParticipant?.name || localParticipant?.identity || "Me";
       const ts = Date.now();
-      try {
-        sendChatData(
-          new TextEncoder().encode(JSON.stringify({ sender, text, ts })),
-          {}
-        );
-      } catch {
-        /* ignore */
-      }
+      // Reliable and retried: a chat line sent while the data channel is
+      // still coming up (or mid-reconnect) must arrive late, not never.
+      sendWithRetry(
+        sendChatData,
+        new TextEncoder().encode(JSON.stringify({ sender, text, ts })),
+        RELIABLE
+      );
       setChatMsgs((prev) => [
         ...prev,
         { id: `${ts}-me-${prev.length}`, sender, text, ts, mine: true },
@@ -440,7 +440,8 @@ export default function TeamsCall({
 
   // A tiny data-channel ping tells everyone to refetch the moment it changes,
   // instead of waiting for the next poll.
-  const { send: sendRecPing } = useDataChannel("recording", () => {
+  const sendRecPing = useTopicSender("recording");
+  useDataChannel("recording", () => {
     refreshRecording();
   });
 
@@ -483,11 +484,7 @@ export default function TeamsCall({
         alert(d.error || "Recording action failed.");
       } else {
         setRecording(next);
-        try {
-          sendRecPing(new TextEncoder().encode(next ? "1" : "0"), RELIABLE);
-        } catch {
-          /* ignore */
-        }
+        sendWithRetry(sendRecPing, new TextEncoder().encode(next ? "1" : "0"), RELIABLE);
       }
     } catch {
       alert("Network error while toggling recording.");
@@ -510,7 +507,7 @@ export default function TeamsCall({
 
   // Reactions, sendable from the landscape rail's More menu too (the round
   // ReactionButton keeps its own sender for the bottom bar).
-  const { send: sendReactionData } = useDataChannel("reactions");
+  const sendReactionData = useTopicSender("reactions");
   const sendReaction = useCallback(
     (emoji: string) => {
       try {
@@ -732,7 +729,8 @@ export default function TeamsCall({
     }
   };
 
-  const { send: sendSpotlight } = useDataChannel("spotlight", (msg) => {
+  const sendSpotlight = useTopicSender("spotlight");
+  useDataChannel("spotlight", (msg) => {
     // A spotlight from someone who isn't running the meeting is ignored, so a
     // participant can't reach in and rearrange everyone else's screen.
     const from = msg.from?.identity;
@@ -3112,11 +3110,11 @@ const EMOJIS = ["👍", "❤️", "😂", "😮", "👏", "🎉"];
 
 function ReactionButton() {
   const [open, setOpen] = useState(false);
-  const { send } = useDataChannel("reactions");
+  const send = useTopicSender("reactions");
 
   function react(emoji: string) {
     try {
-      send(new TextEncoder().encode(emoji), RELIABLE);
+      sendWithRetry(send, new TextEncoder().encode(emoji), RELIABLE);
     } catch {
       /* ignore */
     }

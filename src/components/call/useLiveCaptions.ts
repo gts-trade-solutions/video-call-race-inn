@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDataChannel, useLocalParticipant } from "@livekit/components-react";
-import { decodeMsg, safeSend, type Sender } from "./channel";
+import { decodeMsg, safeSend, type Sender, useTopicSender } from "./channel";
 
 /**
  * Live captions and meeting notes, for free.
@@ -168,7 +168,8 @@ export function useLiveCaptions(opts: {
     });
   }, []);
 
-  const { send } = useDataChannel("captions", (msg) => {
+  const send = useTopicSender("captions");
+  useDataChannel("captions", (msg) => {
     const from = msg.from?.identity;
     if (!from || from === meRef.current) return;
     const d = decodeMsg<CaptionMsg>(msg.payload);

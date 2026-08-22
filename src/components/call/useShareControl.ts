@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDataChannel, useLocalParticipant } from "@livekit/components-react";
-import { decodeMsg, safeSend, type Sender } from "./channel";
+import { decodeMsg, safeSend, type Sender, useTopicSender } from "./channel";
 
 /**
  * "Request control" / "Give control" during a screen share — the Teams
@@ -97,7 +97,8 @@ export function useShareControl(opts: {
     setTimeout(() => setPings((p) => p.filter((i) => i.id !== id)), 1200);
   }, []);
 
-  const { send } = useDataChannel("control", (msg) => {
+  const send = useTopicSender("control");
+  useDataChannel("control", (msg) => {
     const from = msg.from?.identity;
     if (!from) return;
     const d = decodeMsg<ControlMsg>(msg.payload);

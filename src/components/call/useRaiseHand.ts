@@ -7,7 +7,7 @@ import {
   useRoomContext,
 } from "@livekit/components-react";
 import { RoomEvent, type RemoteParticipant } from "livekit-client";
-import { decodeMsg, safeSend, type Sender } from "./channel";
+import { decodeMsg, safeSend, type Sender, useTopicSender } from "./channel";
 
 /**
  * Teams-style "raise your hand".
@@ -182,7 +182,8 @@ export function useRaiseHand(opts: {
     announce(true, at);
   }, [commit, announce]);
 
-  const { send } = useDataChannel("hands", (msg) => {
+  const send = useTopicSender("hands");
+  useDataChannel("hands", (msg) => {
     const from = msg.from?.identity;
     if (!from) {
       // Without a sender there is no hand to attribute this to. Worth a line:
