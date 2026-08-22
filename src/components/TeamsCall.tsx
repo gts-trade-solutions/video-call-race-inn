@@ -2195,6 +2195,31 @@ function Tile({
   });
   const hasVideo = !!trackRef.publication && !camMuted;
   const name = p.name || p.identity;
+  // A publication exists the moment someone turns their camera on, but the
+  // frames arrive later — after subscription, and later still on a slow or
+  // far-away link. In that gap the <video> element has nothing to show, and
+  // the browser fills it with its own broken-media glyph: a white box and a
+  // red cross, which reads as "this person's camera is broken" when nothing
+  // is wrong yet. Hold the avatar over the tile until a frame actually lands.
+  const trackSid = trackRef.publication?.trackSid;
+  const [videoReady, setVideoReady] = useState(false);
+  useEffect(() => {
+    setVideoReady(false);
+  }, [trackSid, camMuted]);
+
+  // Camera-on-but-not-through looks identical to camera-off, which is how a
+  // slow link gets reported as "their camera is broken". After a few seconds
+  // of waiting, say which one it is.
+  const waiting = hasVideo && !videoReady;
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!waiting) {
+      setSlow(false);
+      return;
+    }
+    const t = setTimeout(() => setSlow(true), 3000);
+    return () => clearTimeout(t);
+  }, [waiting]);
   const allHands = useContext(HandsContext);
   const raisedAt = allHands[p.identity];
   // Teams numbers the queue by who raised first.
@@ -2265,16 +2290,26 @@ function Tile({
           <PinIcon active={focused} />
         </button>
       )}
-      {hasVideo ? (
+      {hasVideo && (
         <VideoTrack
           trackRef={trackRef as TrackReference}
+          // Mounted even before the track is subscribed: the element's own
+          // visibility is what drives adaptiveStream, so withholding it would
+          // be why the video never starts.
+          onLoadedData={() => setVideoReady(true)}
+          onPlaying={() => setVideoReady(true)}
           className={`w-full h-full object-cover ${
             p.isLocal ? "-scale-x-100" : ""
           }`}
         />
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center">
+      )}
+      {(!hasVideo || !videoReady) && (
+        // Opaque, so it covers the empty <video> rather than sitting beside it.
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-teams-stage">
           <Avatar name={name} size={compact ? 44 : 88} />
+          {slow && !compact && (
+            <span className="text-[11px] text-white/70">Connecting video…</span>
+          )}
         </div>
       )}
 
