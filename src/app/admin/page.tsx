@@ -7,14 +7,14 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
   const user = await getSession();
-  // Signed out, or holding a cookie whose account is gone: clear it on the way
-  // to sign-in rather than bouncing off middleware, which still reads the
-  // cookie as valid.
-  if (!user) redirect("/api/auth/logout?next=/admin");
+  // Holding a cookie whose account is gone — middleware still reads it as
+  // valid, so clear it on the way past rather than bouncing off middleware.
+  if (!user) redirect("/api/auth/logout?next=/admin/login");
 
-  // Signed in, just not an administrator. Sending them to sign in again would
-  // suggest the wrong problem and wouldn't fix it either.
-  if (!user.isAdmin) redirect("/dashboard");
+  // Signed in, just not an administrator. The admin sign-in rather than the
+  // app's: they may well have an admin account, just not the one they are
+  // currently using, and this is where they can switch to it.
+  if (!user.isAdmin) redirect("/admin/login?reason=notadmin");
 
   return (
     <AppShell user={user}>
