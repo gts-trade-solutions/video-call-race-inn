@@ -200,9 +200,13 @@ export default function AppShell({
               leave a gap — it lets everything on the right slide across into
               it. An empty box holds the position. */}
           <span className="flex items-center shrink-0 min-w-0">
+            {/* 32px on phones, 40px above, in a 48/56px bar. It was 18/24,
+                which left it visibly smaller than the secondary mark beside it
+                and adrift in a bar with room to spare. Sized by height so any
+                width of wordmark works. */}
             <BrandLogo
               slot="logoPrimary"
-              className="h-[18px] sm:h-6 w-auto max-w-[46vw] object-contain"
+              className="h-8 sm:h-10 w-auto max-w-[46vw] object-contain"
               plateClassName="flex items-center shrink-0"
             />
           </span>
