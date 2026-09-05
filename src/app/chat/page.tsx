@@ -5,7 +5,7 @@ import ChatClient from "@/components/ChatClient";
 
 export default async function ChatPage() {
   const user = await getSession();
-  if (!user) redirect("/login?next=/chat");
+  if (!user) redirect("/api/auth/logout?next=/chat");
   return (
     <AppShell user={user}>
       <ChatClient user={user} />

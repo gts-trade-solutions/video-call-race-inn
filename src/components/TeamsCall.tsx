@@ -1001,8 +1001,7 @@ export default function TeamsCall({
                 directly. BluDerma is the primary one here; the Korea mark rides
                 on the right of the header beside the call controls. */}
             <BrandLogo
-              name="logo-bluderma"
-              alt="BluDerma"
+              slot="logoPrimary"
               className="h-4 sm:h-5 w-auto max-w-[38vw] object-contain"
               plateClassName="flex items-center shrink-0"
             />
@@ -1034,8 +1033,7 @@ export default function TeamsCall({
               </span>
             )}
             <BrandLogo
-              name="logo-madenkorea"
-              alt="Made N Korea"
+              slot="logoSecondary"
               className="h-7 w-auto object-contain"
               plateClassName="hidden md:flex items-center shrink-0 mr-1"
             />

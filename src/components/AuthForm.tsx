@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { BrandLogo } from "@/components/Logo";
+import { useBranding } from "@/components/BrandingProvider";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -13,9 +14,12 @@ const OAUTH_ERRORS: Record<string, string> = {
   google_unverified:
     "Your Google account's email isn't verified, so we can't sign you in.",
   google_failed: "Google sign-in failed. Please try again.",
+  account_disabled:
+    "This account has been disabled. Contact an administrator.",
 };
 
 export default function AuthForm({ mode }: { mode: "login" | "register" }) {
+  const branding = useBranding();
   const router = useRouter();
   const params = useSearchParams();
   const [name, setName] = useState("");
@@ -100,16 +104,15 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
               white, and the light mark's "BLU" is white too — it would read as
               just "DERMA". */}
           <BrandLogo
-            name="logo-bluderma-dark"
-            alt="BluDerma"
+            slot="logoPrimaryDark"
             className="w-48 sm:w-56 h-auto object-contain"
             plateClassName="flex items-center mb-5"
           />
           <h1 className="text-xl font-semibold text-teams-dark leading-tight">
-            {isRegister ? "Create your account" : "Welcome back"}
+            {isRegister ? branding.registerHeading : branding.signInHeading}
           </h1>
           <p className="text-sm text-teams-gray">
-            {isRegister ? "Sign up to start meeting" : "Sign in to start meeting"}
+            {isRegister ? branding.registerTagline : branding.signInTagline}
           </p>
         </div>
 

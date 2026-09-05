@@ -1,17 +1,13 @@
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  GetObjectCommand,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-/**
- * Generates a temporary, signed download URL for a recording object so private
- * S3 buckets still work — no need to make the bucket public.
- */
-export async function presignRecording(
-  bucket: string,
-  region: string,
-  key: string,
-  expiresInSecs = 3600
-): Promise<string> {
-  const client = new S3Client({
+/** The bucket's own region wins; everything else comes from the environment. */
+function client(region: string): S3Client {
+  return new S3Client({
     region,
     endpoint: process.env.S3_ENDPOINT || undefined,
     forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
@@ -28,7 +24,38 @@ export async function presignRecording(
         "",
     },
   });
-  return getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: key }), {
-    expiresIn: expiresInSecs,
-  });
+}
+
+/**
+ * Generates a temporary, signed download URL for a recording object so private
+ * S3 buckets still work — no need to make the bucket public.
+ */
+export async function presignRecording(
+  bucket: string,
+  region: string,
+  key: string,
+  expiresInSecs = 3600
+): Promise<string> {
+  return getSignedUrl(
+    client(region),
+    new GetObjectCommand({ Bucket: bucket, Key: key }),
+    { expiresIn: expiresInSecs }
+  );
+}
+
+/**
+ * Deletes a recording's object from S3.
+ *
+ * Only reached from the admin panel, and only when an administrator asks for
+ * the file itself to go rather than just the row that points at it. S3 has no
+ * undo here, which is why the two are separate actions.
+ */
+export async function deleteRecordingObject(
+  bucket: string,
+  region: string,
+  key: string
+): Promise<void> {
+  await client(region).send(
+    new DeleteObjectCommand({ Bucket: bucket, Key: key })
+  );
 }

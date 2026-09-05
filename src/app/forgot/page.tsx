@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { PasswordField } from "@/components/AuthForm";
 import { BrandLogo } from "@/components/Logo";
+import { useBranding } from "@/components/BrandingProvider";
 
 export default function ForgotPage() {
+  const branding = useBranding();
   const router = useRouter();
   const [stage, setStage] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
@@ -88,13 +90,12 @@ export default function ForgotPage() {
             white, and the light mark's "BLU" is white too — it would read as
             just "DERMA". */}
         <BrandLogo
-          name="logo-bluderma-dark"
-          alt="BluDerma"
+          slot="logoPrimaryDark"
           className="w-48 sm:w-56 h-auto object-contain"
           plateClassName="flex items-center mb-5"
         />
         <h1 className="text-xl font-semibold text-teams-dark">
-          Reset your password
+          {branding.resetHeading}
         </h1>
 
         {stage === "email" ? (

@@ -511,6 +511,34 @@ export function ensureSchema(): Promise<void> {
         if ((e as { errno?: number }).errno !== 1060) throw e;
       }
 
+      // Migration: site administrators.
+      //
+      // Not the same thing as the host and co-host roles in lib/meetingRoles —
+      // those are per-meeting and say who runs one call. This one is global and
+      // says who can open /admin, which sees every account, meeting and
+      // recording in the deployment. Off for everyone until someone is promoted
+      // (scripts/make-admin.mjs promotes the first one).
+      try {
+        await pool.query(
+          "ALTER TABLE users ADD COLUMN is_admin TINYINT(1) NOT NULL DEFAULT 0"
+        );
+      } catch (e) {
+        if ((e as { errno?: number }).errno !== 1060) throw e;
+      }
+
+      // Migration: a disabled account keeps all of its data — meetings it
+      // hosted, messages it sent — but cannot sign in, and its existing
+      // sessions stop working on the next request. Deleting instead would take
+      // the whole history of the account with it (every foreign key here
+      // cascades), which is rarely what "stop this person signing in" means.
+      try {
+        await pool.query(
+          "ALTER TABLE users ADD COLUMN disabled_at TIMESTAMP NULL DEFAULT NULL"
+        );
+      } catch (e) {
+        if ((e as { errno?: number }).errno !== 1060) throw e;
+      }
+
       // Call recordings (LiveKit Egress → S3). One row per recording session.
       await pool.query(`
         CREATE TABLE IF NOT EXISTS recordings (
@@ -596,6 +624,47 @@ export function ensureSchema(): Promise<void> {
             REFERENCES users(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
+
+      // Every action taken from /admin. An administrator can disable accounts,
+      // delete meetings and remove recordings, and those are exactly the
+      // changes nobody can reconstruct afterwards from the rest of the data —
+      // the row that would explain them is the row that was deleted. The actor
+      // survives their own account being removed (ON DELETE SET NULL), so the
+      // trail does not disappear along with them.
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS admin_actions (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          actor_id INT NULL,
+          actor_email VARCHAR(190) NULL,
+          action VARCHAR(64) NOT NULL,
+          target_type VARCHAR(32) NOT NULL,
+          target_id VARCHAR(190) NULL,
+          detail VARCHAR(500) NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_aa_time (created_at),
+          INDEX idx_aa_actor (actor_id),
+          CONSTRAINT fk_aa_actor FOREIGN KEY (actor_id)
+            REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      // Deployment-wide settings an administrator can change without a deploy.
+      // Only branding.* lives here today (see lib/branding): the wordmarks and
+      // the words that go with them, which used to be files in public/ and
+      // string literals in six components. A key is absent when it has never
+      // been changed, so "reset to default" is a DELETE and the default keeps
+      // living in the source where it can be read.
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS app_settings (
+          setting_key VARCHAR(64) PRIMARY KEY,
+          setting_value TEXT NULL,
+          updated_by INT NULL,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ON UPDATE CURRENT_TIMESTAMP,
+          CONSTRAINT fk_settings_user FOREIGN KEY (updated_by)
+            REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
     })().catch((err) => {
       // Reset so a later request can retry (e.g. DB was down at boot).
       globalForDb._schemaReady = undefined;
@@ -610,6 +679,8 @@ export type DBUser = {
   name: string;
   email: string;
   password_hash: string;
+  is_admin: number;
+  disabled_at: string | null;
   created_at: string;
 };
 

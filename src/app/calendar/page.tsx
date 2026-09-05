@@ -5,7 +5,7 @@ import CalendarClient from "@/components/CalendarClient";
 
 export default async function CalendarPage() {
   const user = await getSession();
-  if (!user) redirect("/login?next=/calendar");
+  if (!user) redirect("/api/auth/logout?next=/calendar");
 
   return (
     <AppShell user={user}>

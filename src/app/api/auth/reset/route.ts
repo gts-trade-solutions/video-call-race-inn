@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { ensureSchema, getPool } from "@/lib/db";
-import { hashPassword, createSession, forgetPasswordEpoch } from "@/lib/auth";
+import { hashPassword, createSession, forgetAccount } from "@/lib/auth";
 import { rateLimit, clientIp, HOUR } from "@/lib/rateLimit";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 
@@ -127,7 +127,7 @@ export async function POST(req: Request) {
       "UPDATE users SET password_hash = :hash, password_changed_at = NOW() WHERE id = :uid",
       { hash: password_hash, uid: user.id }
     );
-    forgetPasswordEpoch(user.id);
+    forgetAccount(user.id);
     await pool.query<ResultSetHeader>(
       "UPDATE password_resets SET used_at = NOW() WHERE user_id = :uid AND used_at IS NULL",
       { uid: user.id }

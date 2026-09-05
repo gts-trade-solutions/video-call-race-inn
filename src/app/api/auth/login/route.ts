@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { ensureSchema, getPool } from "@/lib/db";
-import { verifyPassword, createSession } from "@/lib/auth";
+import { verifyPassword, createSession, forgetAccount } from "@/lib/auth";
+import {
+  isStaticAdminEmail,
+  upsertStaticAdmin,
+  verifyStaticAdminPassword,
+} from "@/lib/staticAdmin";
 import { rateLimit, clientIp, MINUTE } from "@/lib/rateLimit";
 import type { RowDataPacket } from "mysql2";
 
@@ -33,9 +38,27 @@ export async function POST(req: Request) {
       );
     }
 
+    // ----- The administrator configured in the environment -----
+    //
+    // Checked before the database on purpose: this has to work when the
+    // account has been deleted, demoted, disabled, or had its password
+    // changed, which is exactly when it is needed. A wrong password here is
+    // not a failure — it falls through to the ordinary check below, so an
+    // account at this address keeps its own password too.
+    if (
+      isStaticAdminEmail(emailKey) &&
+      (await verifyStaticAdminPassword(String(password)))
+    ) {
+      const user = await upsertStaticAdmin();
+      forgetAccount(user.id);
+      await createSession(user);
+      return NextResponse.json({ user });
+    }
+
     const pool = getPool();
     const [rows] = await pool.query<RowDataPacket[]>(
-      "SELECT id, name, email, password_hash, avatar_url FROM users WHERE email = :email LIMIT 1",
+      `SELECT id, name, email, password_hash, avatar_url, disabled_at
+         FROM users WHERE email = :email LIMIT 1`,
       { email: String(email).toLowerCase() }
     );
 
@@ -52,6 +75,16 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: "Invalid email or password." },
         { status: 401 }
+      );
+    }
+
+    // Checked after the password, not before: answering "that account is
+    // disabled" to anyone who types the address would tell a stranger which
+    // addresses have accounts here.
+    if (row.disabled_at) {
+      return NextResponse.json(
+        { error: "This account has been disabled. Contact an administrator." },
+        { status: 403 }
       );
     }
 

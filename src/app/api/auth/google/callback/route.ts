@@ -45,7 +45,8 @@ export async function GET(req: Request) {
 
     const pool = getPool();
     const [rows] = await pool.query<RowDataPacket[]>(
-      "SELECT id, name, email, avatar_url FROM users WHERE email = :email LIMIT 1",
+      `SELECT id, name, email, avatar_url, disabled_at
+         FROM users WHERE email = :email LIMIT 1`,
       { email: profile.email }
     );
 
@@ -58,6 +59,8 @@ export async function GET(req: Request) {
 
     if (rows.length > 0) {
       const row = rows[0];
+      // A disabled account is disabled however it signs in — Google included.
+      if (row.disabled_at) return fail("account_disabled");
       // Backfill an avatar from Google if the account doesn't have one.
       if (!row.avatar_url && profile.picture) {
         await pool.query<ResultSetHeader>(

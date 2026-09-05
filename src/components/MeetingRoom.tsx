@@ -399,8 +399,7 @@ export default function MeetingRoom({
         <div className="min-h-full flex flex-col items-center justify-center px-4 py-8">
         <div className="mb-6 text-center flex flex-col items-center">
           <BrandLogo
-            name="logo-bluderma"
-            alt="BluDerma"
+            slot="logoPrimary"
             className="h-5 sm:h-6 w-auto max-w-[70vw] object-contain"
             plateClassName="flex items-center mb-4"
           />

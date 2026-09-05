@@ -14,7 +14,7 @@ export default async function MeetingPage({
   searchParams: { mode?: string };
 }) {
   const user = await getSession();
-  if (!user) redirect(`/login?next=/meeting/${params.room}`);
+  if (!user) redirect(`/api/auth/logout?next=/meeting/${params.room}`);
 
   // Show the real meeting title in the call header instead of just the id.
   let title = "";

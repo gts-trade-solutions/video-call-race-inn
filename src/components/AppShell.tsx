@@ -140,6 +140,11 @@ export default function AppShell({
     { href: "/chat", label: "Chat", icon: <ChatIcon /> },
     { href: "/dashboard", label: "Meetings", icon: <MeetingsIcon /> },
     { href: "/calendar", label: "Calendar", icon: <CalendarNavIcon /> },
+    // Hiding the door, not guarding it — /admin and every route under
+    // /api/admin check administrator status for themselves.
+    ...(user.isAdmin
+      ? [{ href: "/admin", label: "Admin", icon: <AdminIcon /> }]
+      : []),
   ];
 
   return (
@@ -187,17 +192,23 @@ export default function AppShell({
         <header className="h-12 sm:h-14 shrink-0 bg-teams-purple text-white flex items-center px-3 sm:px-4 justify-between shadow z-10">
           {/* Light versions of both marks, so they sit straight on the dark bar
               with no plate behind them. Both files are trimmed to the artwork
-              itself, so each is sized by height and never clipped. */}
-          <BrandLogo
-            name="logo-bluderma"
-            alt="BluDerma"
-            className="h-[18px] sm:h-6 w-auto max-w-[46vw] object-contain"
-            plateClassName="flex items-center shrink-0"
-          />
+              itself, so each is sized by height and never clipped.
+
+              The wrapper is always rendered, even when the mark is hidden or
+              its file is missing. This header is justify-between with exactly
+              two children, so a left child that disappears entirely does not
+              leave a gap — it lets everything on the right slide across into
+              it. An empty box holds the position. */}
+          <span className="flex items-center shrink-0 min-w-0">
+            <BrandLogo
+              slot="logoPrimary"
+              className="h-[18px] sm:h-6 w-auto max-w-[46vw] object-contain"
+              plateClassName="flex items-center shrink-0"
+            />
+          </span>
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <BrandLogo
-              name="logo-madenkorea"
-              alt="Made N Korea"
+              slot="logoSecondary"
               className="h-9 sm:h-11 w-auto object-contain"
               plateClassName="hidden sm:flex items-center shrink-0"
             />
@@ -357,6 +368,26 @@ function CalendarNavIcon() {
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function AdminIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M12 3 4.5 6v5.5c0 4.4 3.1 8.4 7.5 9.5 4.4-1.1 7.5-5.1 7.5-9.5V6L12 3Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m9 12 2 2 4-4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );
