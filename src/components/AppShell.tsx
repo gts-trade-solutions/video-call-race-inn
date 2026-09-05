@@ -206,7 +206,7 @@ export default function AppShell({
                 width of wordmark works. */}
             <BrandLogo
               slot="logoPrimary"
-              className="h-8 sm:h-10 w-auto max-w-[46vw] object-contain"
+              className="h-8 sm:h-10 w-auto max-w-[46vw] shrink-0 object-contain"
               plateClassName="flex items-center shrink-0"
             />
           </span>
