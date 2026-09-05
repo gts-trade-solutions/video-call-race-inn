@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { adminGuard, recordAdminAction } from "@/lib/admin";
 import {
+  COLOR_FIELDS,
   DEFAULT_BRANDING,
   LOGO_FIELDS,
   TEXT_FIELDS,
+  cleanColor,
   cleanLogo,
   cleanText,
   type Branding,
@@ -66,10 +68,20 @@ export async function PUT(req: Request) {
     changes[field] = value;
   }
 
+  for (const field of COLOR_FIELDS) {
+    if (!(field in body)) continue;
+    const value = cleanColor(body[field]);
+    if (value === undefined) {
+      rejected.push(field);
+      continue;
+    }
+    changes[field] = value;
+  }
+
   if (rejected.length > 0) {
     return NextResponse.json(
       {
-        error: `Couldn't accept: ${rejected.join(", ")}. Logos must be uploaded here, not linked from elsewhere.`,
+        error: `Couldn't accept: ${rejected.join(", ")}. Logos must be uploaded here rather than linked from elsewhere, and colours must be hex (#fff or #ffffff).`,
       },
       { status: 400 }
     );

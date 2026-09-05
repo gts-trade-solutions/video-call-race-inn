@@ -34,6 +34,17 @@ export type Branding = {
   logoPrimary: string | null;
   logoPrimaryDark: string | null;
   logoSecondary: string | null;
+  /**
+   * A colour block behind each mark, or null for none.
+   *
+   * The marks are transparent PNGs sitting straight on whatever is behind them,
+   * which is right until the artwork and the surface disagree — a dark wordmark
+   * on the purple navbar reads as a smudge. A plate is the fix, and it has to
+   * be per slot because the three sit on three different surfaces.
+   */
+  logoPrimaryBg: string | null;
+  logoPrimaryDarkBg: string | null;
+  logoSecondaryBg: string | null;
 };
 
 export const DEFAULT_BRANDING: Branding = {
@@ -50,6 +61,9 @@ export const DEFAULT_BRANDING: Branding = {
   logoPrimary: null,
   logoPrimaryDark: null,
   logoSecondary: null,
+  logoPrimaryBg: null,
+  logoPrimaryDarkBg: null,
+  logoSecondaryBg: null,
 };
 
 /** The default filenames BrandLogo probes in public/ when nothing is uploaded. */
@@ -76,6 +90,19 @@ export const LOGO_FIELDS = [
   "logoPrimaryDark",
   "logoSecondary",
 ] as const;
+
+export const COLOR_FIELDS = [
+  "logoPrimaryBg",
+  "logoPrimaryDarkBg",
+  "logoSecondaryBg",
+] as const;
+
+/** Which colour belongs to which mark, so nothing has to guess by name. */
+export const LOGO_BG_FIELD = {
+  logoPrimary: "logoPrimaryBg",
+  logoPrimaryDark: "logoPrimaryDarkBg",
+  logoSecondary: "logoSecondaryBg",
+} as const;
 
 /** Longest each text field may be, so a stray paste can't break a layout. */
 const MAX_TEXT = 120;
@@ -112,6 +139,24 @@ export function cleanLogo(raw: unknown): string | null | undefined {
   if (v === "") return null;
   if (v === LOGO_HIDDEN) return LOGO_HIDDEN;
   return UPLOAD_PATH.test(v) ? v : undefined;
+}
+
+/**
+ * A hex colour, or null for no plate at all.
+ *
+ * Only `#rgb` and `#rrggbb`. Named colours and rgb()/hsl() would work in CSS
+ * too, but this value is written straight into a style attribute, and a short
+ * allowlist is a great deal easier to be sure of than a parser for everything
+ * CSS accepts.
+ */
+const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+export function cleanColor(raw: unknown): string | null | undefined {
+  if (raw === null) return null;
+  if (typeof raw !== "string") return undefined;
+  const v = raw.trim();
+  if (v === "") return null;
+  return HEX_COLOR.test(v) ? v.toLowerCase() : undefined;
 }
 
 /** Trimmed, length-capped, and stripped of the control characters a paste can carry. */

@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useBranding } from "@/components/BrandingProvider";
-import { DEFAULT_LOGO_FILES, isLogoHidden, logoSrc } from "@/lib/branding";
+import {
+  DEFAULT_LOGO_FILES,
+  LOGO_BG_FIELD,
+  isLogoHidden,
+  logoSrc,
+} from "@/lib/branding";
 
 export type LogoSlot = keyof typeof DEFAULT_LOGO_FILES;
 
@@ -68,9 +73,17 @@ export function BrandLogo({
     alt ??
     (slot === "logoSecondary" ? branding.secondaryName : branding.brandName);
 
+  // The plate behind the mark. Padding and a corner radius come with it: a
+  // colour block sized exactly to the artwork reads as a mistake rather than a
+  // choice, and without them a wordmark touches the edge of its own backing.
+  const plateColor = branding[LOGO_BG_FIELD[slot]];
+
   if (hidden || attempt >= candidates.length) return null;
   return (
-    <span className={plateClassName}>
+    <span
+      className={plateClassName + (plateColor ? " px-2 py-1 rounded-md" : "")}
+      style={plateColor ? { backgroundColor: plateColor } : undefined}
+    >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={candidates[attempt]}

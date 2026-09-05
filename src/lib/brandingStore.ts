@@ -1,6 +1,7 @@
 import { ensureSchema, getPool } from "@/lib/db";
 import type { RowDataPacket } from "mysql2";
 import {
+  COLOR_FIELDS,
   DEFAULT_BRANDING,
   LOGO_FIELDS,
   TEXT_FIELDS,
@@ -59,10 +60,11 @@ export async function getBranding(): Promise<Branding> {
       if (typeof v === "string" && v !== "") overrides[key] = v;
     }
     value = { ...DEFAULT_BRANDING };
-    for (const f of TEXT_FIELDS) {
-      if (overrides[f]) value[f] = overrides[f];
-    }
-    for (const f of LOGO_FIELDS) {
+    // Every field, from one list. Keeping a loop per kind meant a new kind of
+    // field could be saved and read back by the admin panel while never
+    // reaching the pages — which is precisely what the logo background colours
+    // did until this became one loop.
+    for (const f of [...TEXT_FIELDS, ...LOGO_FIELDS, ...COLOR_FIELDS]) {
       if (overrides[f]) value[f] = overrides[f];
     }
   } catch (err) {

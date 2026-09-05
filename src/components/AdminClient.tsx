@@ -6,6 +6,7 @@ import type { SessionUser } from "@/lib/auth";
 import { Modal } from "@/components/meet/ScheduleModal";
 import {
   DEFAULT_LOGO_FILES,
+  LOGO_BG_FIELD,
   LOGO_FIELDS,
   LOGO_HIDDEN,
   TEXT_FIELDS,
@@ -1373,6 +1374,7 @@ function BrandingTab({ onNotice }: { onNotice: (s: string) => void }) {
   }>("/api/admin/branding");
 
   const [text, setText] = useState<Record<string, string> | null>(null);
+  const [color, setColor] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -1381,6 +1383,12 @@ function BrandingTab({ onNotice }: { onNotice: (s: string) => void }) {
     const seeded: Record<string, string> = {};
     for (const f of TEXT_FIELDS) seeded[f] = data.branding[f];
     setText(seeded);
+    const colors: Record<string, string> = {};
+    for (const slot of LOGO_FIELDS) {
+      const field = LOGO_BG_FIELD[slot];
+      colors[field] = data.branding[field] ?? "#ffffff";
+    }
+    setColor(colors);
   }, [data]);
 
   /**
@@ -1490,6 +1498,8 @@ function BrandingTab({ onNotice }: { onNotice: (s: string) => void }) {
             const stored = data.branding[slot.field];
             const hidden = isLogoHidden(stored);
             const uploaded = logoSrc(stored);
+            const bgField = LOGO_BG_FIELD[slot.field];
+            const plateColor = data.branding[bgField];
             return (
               <div
                 key={slot.field}
@@ -1500,6 +1510,7 @@ function BrandingTab({ onNotice }: { onNotice: (s: string) => void }) {
                     slot.onDark ? "bg-teams-purpleDarker" : "bg-teams-bg"
                   }`}
                 >
+                  {/* The plate, drawn exactly as BrandLogo draws it. */}
                   {hidden ? (
                     <span
                       className={`text-xs ${
@@ -1511,11 +1522,22 @@ function BrandingTab({ onNotice }: { onNotice: (s: string) => void }) {
                   ) : (
                     <>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={uploaded ?? `/${DEFAULT_LOGO_FILES[slot.field]}.png`}
-                        alt=""
-                        className="max-h-12 max-w-full object-contain"
-                      />
+                      <span
+                        className={
+                          plateColor ? "px-2 py-1 rounded-md inline-flex" : ""
+                        }
+                        style={
+                          plateColor
+                            ? { backgroundColor: plateColor }
+                            : undefined
+                        }
+                      >
+                        <img
+                          src={uploaded ?? `/${DEFAULT_LOGO_FILES[slot.field]}.png`}
+                          alt=""
+                          className="max-h-12 max-w-full object-contain"
+                        />
+                      </span>
                     </>
                   )}
                 </div>
@@ -1538,6 +1560,53 @@ function BrandingTab({ onNotice }: { onNotice: (s: string) => void }) {
                       ? "not shown anywhere"
                       : (stored ?? `public/${DEFAULT_LOGO_FILES[slot.field]}.png`)}
                   </div>
+                  {!hidden && (
+                    <div className="flex items-center gap-2 mt-2 flex-wrap">
+                      <span className="text-xs text-teams-gray">Background</span>
+                      <input
+                        type="color"
+                        value={color[bgField] ?? "#ffffff"}
+                        onChange={(e) =>
+                          setColor((c) => ({ ...c, [bgField]: e.target.value }))
+                        }
+                        className="w-8 h-7 rounded border border-teams-line bg-white p-0.5 cursor-pointer"
+                        aria-label={`${slot.label} background colour`}
+                      />
+                      <input
+                        value={color[bgField] ?? ""}
+                        onChange={(e) =>
+                          setColor((c) => ({ ...c, [bgField]: e.target.value }))
+                        }
+                        placeholder="#ffffff"
+                        className="w-24 text-xs font-mono border border-teams-line rounded px-2 py-1"
+                      />
+                      <Btn
+                        onClick={async () => {
+                          if (await put({ [bgField]: color[bgField] ?? "" })) {
+                            onNotice("Logo background applied.");
+                          }
+                        }}
+                        disabled={busy || color[bgField] === (plateColor ?? "")}
+                      >
+                        Apply
+                      </Btn>
+                      {plateColor && (
+                        <Btn
+                          onClick={async () => {
+                            if (await put({ [bgField]: null })) {
+                              onNotice("Logo background removed.");
+                            }
+                          }}
+                          disabled={busy}
+                        >
+                          None
+                        </Btn>
+                      )}
+                      <span className="text-xs text-teams-gray">
+                        {plateColor ? `now ${plateColor}` : "none (transparent)"}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2 shrink-0">
                   <label
